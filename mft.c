@@ -2914,4 +2914,84 @@ rollback:
 	mark_mft_record_dirty(ni);
 	return err;
 }
+/**
+ * ntfs_mft_record_free - free an mft record on an ntfs volume
+ * @vol:	volume on which to free the mft record
+ * @ni:		open ntfs inode of the mft record to free
+ *
+ * Free the mft record of the open inode @ni on the mounted ntfs volume @vol.
+ * Note that this function calls ntfs_inode_close() internally and hence you
+ * cannot use the pointer @ni any more after this function returns success.
+ *
+ * On success return 0 and on error return -1 with errno set to the error code.
+ */
+int ntfs_mft_record_free(ntfs_volume *vol, ntfs_inode *ni,MFT_RECORD* mrec)
+{
+	u64 mft_no;
+	int err;
+	u16 seq_no, old_seq_no;
+
+	ntfs_debug("Entering for inode 0x%llx.\n", (long long) ni->mft_no);
+
+	if (!vol || !vol->mftbmp_ino || !ni) 
+	{
+		return -EINVAL;
+	}
+
+	/* Cache the mft reference for later. */
+	mft_no = ni->mft_no;
+
+	/* Mark the mft record as not in use. */
+	mrec->flags &= ~MFT_RECORD_IN_USE;
+
+	/* Increment the sequence number, skipping zero, if it is not zero. */
+	old_seq_no = mrec->sequence_number;
+
+	seq_no = le16_to_cpu(old_seq_no);
+	if (seq_no == 0xffff)
+		seq_no = 1;
+	else if (seq_no)
+		seq_no++;
+	mrec->sequence_number = cpu_to_le16(seq_no);
+
+	/* Set the inode dirty and write it out. */
+	flush_dcache_mft_record_page(ni);
+	mark_mft_record_dirty(ni);
+
+	/* Clear the bit in the $MFT/$BITMAP corresponding to this record. */
+	ntfs_debug("before down_write...");
+	//down_write(&vol->mftbmp_lock);
+	if ( (err = ntfs_bitmap_clear_bit(vol->mftbmp_ino, mft_no ))) 
+	//up_write(&vol->mftbmp_lock);
+	{
+		// FIXME: If ntfs_bitmap_clear_run() guarantees rollback on
+		//	  error, this could be changed to goto sync_rollback;
+		goto bitmap_rollback;
+	}
+
+	/* Throw away the now freed inode. 
+	if (!ntfs_inode_close(ni)) {
+		vol->free_mft_records++; 
+		return 0;
+	}
+	err = errno;*/
+	flush_dcache_mft_record_page(ni);
+	mark_mft_record_dirty(ni);
+	return 0;
+
+	/* Rollback what we did... */
+bitmap_rollback:
+	down_write(&vol->mftbmp_lock);
+	if (ntfs_bitmap_set_bit(vol->mftbmp_ino, mft_no))
+	up_write(&vol->mftbmp_lock);
+	{
+		ntfs_debug("Eeek! Rollback failed in ntfs_mft_record_free().  "
+				"Leaving inconsistent metadata!\n");
+	}
+	mrec->flags |= MFT_RECORD_IN_USE;
+	mrec->sequence_number = old_seq_no;
+	flush_dcache_mft_record_page(ni);
+	mark_mft_record_dirty(ni);
+	return err;
+}
 #endif /* NTFS_RW */
