@@ -1,33 +1,33 @@
 # Rules for making the NTFS driver.
-
-obj-m += ntfs.o
+ifneq ($(KERNELRELEASE),)
+obj-$(CONFIG_NTFS_FS) += ntfs.o
 
 ntfs-y := aops.o attrib.o collate.o compress.o debug.o dir.o file.o \
 		  index.o inode.o mft.o mst.o namei.o runlist.o super.o sysctl.o \
 		  unistr.o upcase.o
 
-ntfs-y += bitmap.o lcnalloc.o logfile.o quota.o usnjrnl.o
+ntfs-$(CONFIG_NTFS_RW) += bitmap.o lcnalloc.o logfile.o quota.o usnjrnl.o
 
-ccflags-y := -DNTFS_VERSION=\"2.1.30\"
-ccflags-y += -DDEBUG
-ccflags-y += -DNTFS_RW
+ccflags-y := -DNTFS_VERSION=\"2.1.32\"
+ccflags-$(CONFIG_NTFS_DEBUG)	+= -DDEBUG
+ccflags-$(CONFIG_NTFS_RW)	+= -DNTFS_RW
+else
 
-EXTRA_FLAGS += -I$(PWD)
+KERNEL ?= /lib/modules/`uname -r`/build
 
-#KDIR	:= /usr/src/linux/
-KDIR	:= /lib/modules/$(shell uname -r)/build
-PWD		:= $(shell pwd)
+default:
+	CONFIG_NTFS_FS=m CONFIG_NTFS_RW=y CONFIG_NTFS_DEBUG=y $(MAKE) -C $(KERNEL) M=$$PWD
 
 
-all:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+.PHONY : install help clean
+help:
+	$(MAKE) -C $(KERNEL) M=$$PWD help
+
+install : default
+	$(MAKE) -C $(KERNEL) M=$$PWD modules_install
+	depmod -A
 
 clean:
-	$(MAKE) -C $(KDIR) M=$(PWD) clean
+	make -C $(KERNEL) M=`pwd` clean
 
-help:
-	$(MAKE) -C $(KDIR) M=$(PWD) help
-
-.PHONY : install
-install : all
-	sudo $(MAKE) -C $(KDIR) M=$(PWD) modules_install; sudo depmod
+endif
