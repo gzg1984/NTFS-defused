@@ -58,7 +58,7 @@ typedef enum {
 /**
  * ntfs_compression_buffer - one buffer for the decompression engine
  */
-static u8 *ntfs_compression_buffer;
+static u8 *ntfs_compression_buffer = NULL;
 
 /**
  * ntfs_cb_lock - spinlock which protects ntfs_compression_buffer

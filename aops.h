@@ -39,8 +39,10 @@
  */
 static inline void ntfs_unmap_page(struct page *page)
 {
+	ntfs_debug("Entering .");
 	kunmap(page);
 	page_cache_release(page);
+	ntfs_debug("done .");
 }
 
 /**
