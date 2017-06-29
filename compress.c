@@ -105,10 +105,6 @@ static void zero_partial_compressed_page(struct page *page,
 
 	ntfs_debug("Zeroing page region outside initialized size.");
 	if (((s64)page->index << PAGE_SHIFT) >= initialized_size) {
-		/*
-		 * FIXME: Using clear_page() will become wrong when we get
-		 * PAGE_SIZE != PAGE_SIZE but for now there is no problem.
-		 */
 		clear_page(kp);
 		return;
 	}
@@ -674,7 +670,7 @@ lock_retry_remap:
 		}
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_read_sync;
-		submit_bh(READ, tbh);
+		submit_bh(REQ_OP_READ, 0, tbh);
 	}
 
 	/* Wait for io completion on all buffer heads. */
@@ -753,11 +749,6 @@ lock_retry_remap:
 		for (; cur_page < cb_max_page; cur_page++) {
 			page = pages[cur_page];
 			if (page) {
-				/*
-				 * FIXME: Using clear_page() will become wrong
-				 * when we get PAGE_SIZE != PAGE_SIZE but
-				 * for now there is no problem.
-				 */
 				if (likely(!cur_ofs))
 					clear_page(page_address(page));
 				else

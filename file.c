@@ -30,7 +30,7 @@
 #include <linux/writeback.h>
 
 #include <asm/page.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "attrib.h"
 #include "bitmap.h"
@@ -382,7 +382,7 @@ static ssize_t ntfs_prepare_file_for_write(struct kiocb *iocb,
 	base_ni = ni;
 	if (NInoAttr(ni))
 		base_ni = ni->ext.base_ntfs_ino;
-	err = file_remove_suid(file);
+	err = file_remove_privs(file);
 	if (unlikely(err))
 		goto out;
 	/*
@@ -525,7 +525,8 @@ static inline int __ntfs_grab_cache_pages(struct address_space *mapping,
 				}
 			}
 			err = add_to_page_cache_lru(*cached_page, mapping,
-					index, GFP_KERNEL);
+				   index,
+				   mapping_gfp_constraint(mapping, GFP_KERNEL));
 			if (unlikely(err)) {
 				if (err == -EEXIST)
 					continue;
@@ -552,7 +553,7 @@ static inline int ntfs_submit_bh_for_read(struct buffer_head *bh)
 	lock_buffer(bh);
 	get_bh(bh);
 	bh->b_end_io = end_buffer_read_sync;
-	return submit_bh(READ, bh);
+	return submit_bh(REQ_OP_READ, 0, bh);
 }
 
 /**
@@ -739,8 +740,7 @@ map_buffer_cached:
 					set_buffer_uptodate(bh);
 				if (unlikely(was_hole)) {
 					/* We allocated the buffer. */
-					unmap_underlying_metadata(bh->b_bdev,
-							bh->b_blocknr);
+					clean_bdev_bh_alias(bh);
 					if (bh_end <= pos || bh_pos >= end)
 						mark_buffer_dirty(bh);
 					else
@@ -783,7 +783,7 @@ map_buffer_cached:
 				continue;
 			}
 			/* We allocated the buffer. */
-			unmap_underlying_metadata(bh->b_bdev, bh->b_blocknr);
+			clean_bdev_bh_alias(bh);
 			/*
 			 * If the buffer is fully outside the write, zero it,
 			 * set it uptodate, and mark it dirty so it gets
@@ -1849,7 +1849,7 @@ again:
 		 * pages being swapped out between us bringing them into memory
 		 * and doing the actual copying.
 		 */
-		if (unlikely(iov_iter_fault_in_multipages_readable(i, bytes))) {
+		if (unlikely(iov_iter_fault_in_readable(i, bytes))) {
 			status = -EFAULT;
 			break;
 		}
@@ -1943,20 +1943,17 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	ssize_t written = 0;
 	ssize_t err;
 
-	mutex_lock(&vi->i_mutex);
+	inode_lock(vi);
 	/* We can write back this queue in page reclaim. */
 	current->backing_dev_info = inode_to_bdi(vi);
 	err = ntfs_prepare_file_for_write(iocb, from);
 	if (iov_iter_count(from) && !err)
 		written = ntfs_perform_write(file, from, iocb->ki_pos);
 	current->backing_dev_info = NULL;
-	mutex_unlock(&vi->i_mutex);
-	if (likely(written > 0)) {
-		err = generic_write_sync(file, iocb->ki_pos, written);
-		if (err < 0)
-			written = 0;
-	}
+	inode_unlock(vi);
 	iocb->ki_pos += written;
+	if (likely(written > 0))
+		written = generic_write_sync(iocb, written);
 	return written ? written : err;
 }
 
@@ -1995,7 +1992,7 @@ static int ntfs_file_fsync(struct file *filp, loff_t start, loff_t end,
 	err = filemap_write_and_wait_range(vi->i_mapping, start, end);
 	if (err)
 		return err;
-	mutex_lock(&vi->i_mutex);
+	inode_lock(vi);
 
 	BUG_ON(S_ISDIR(vi->i_mode));
 	if (!datasync || !NInoNonResident(NTFS_I(vi)))
@@ -2014,7 +2011,7 @@ static int ntfs_file_fsync(struct file *filp, loff_t start, loff_t end,
 	else
 		ntfs_warning(vi->i_sb, "Failed to f%ssync inode 0x%lx.  Error "
 				"%u.", datasync ? "data" : "", vi->i_ino, -ret);
-	mutex_unlock(&vi->i_mutex);
+	inode_unlock(vi);
 	return ret;
 }
 

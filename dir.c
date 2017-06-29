@@ -1912,7 +1912,7 @@ find_next_index_buffer:
 	}
 	/* Get the current index buffer. */
 	ia = (INDEX_ALLOCATION*)(kaddr + (ia_pos & ~PAGE_MASK &
-			~(s64)(ndir->itype.index.block_size - 1)));
+					  ~(s64)(ndir->itype.index.block_size - 1)));
 	/* Bounds checks. */
 	if (unlikely((u8*)ia < kaddr || (u8*)ia > kaddr + PAGE_SIZE)) {
 		ntfs_error(sb, "Out of bounds check failed. Corrupt directory "
@@ -2113,7 +2113,7 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 	err = filemap_write_and_wait_range(vi->i_mapping, start, end);
 	if (err)
 		return err;
-	mutex_lock(&vi->i_mutex);
+	inode_lock(vi);
 
 	BUG_ON(!S_ISDIR(vi->i_mode));
 	/* If the bitmap attribute inode is in memory sync it, too. */
@@ -2136,7 +2136,7 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 	else
 		ntfs_warning(vi->i_sb, "Failed to f%ssync inode 0x%lx.  Error "
 				"%u.", datasync ? "data" : "", vi->i_ino, -ret);
-	mutex_unlock(&vi->i_mutex);
+	inode_unlock(vi);
 	return ret;
 }
 
@@ -2148,8 +2148,6 @@ const struct file_operations ntfs_dir_ops = {
 	.iterate	= ntfs_readdir,		/* Read directory contents. */
 #ifdef NTFS_RW
 	.fsync		= ntfs_dir_fsync,	/* Sync a directory to disk. */
-	/*.aio_fsync	= ,*/			/* Sync all outstanding async
-						   i/o operations on a kiocb. */
 #endif /* NTFS_RW */
 	/*.ioctl	= ,*/			/* Perform function on the
 						   mounted filesystem. */
