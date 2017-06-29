@@ -978,9 +978,9 @@ ntfs_inode *ntfs_create(ntfs_inode *dir_ni, ntfschar *name, u8 name_len,
 /**************************************Gzged porting from ntfs-3g *********/
 
 static int gzged_ntfs_create(struct inode *dir,
-								struct dentry *dent,
-								int mode, 
-								struct nameidata * pn __attribute__((unused)) )
+				struct dentry *dent,
+				umode_t mode, 
+				bool pn )
 {
 	ntfschar *uname;
 	int uname_len;
