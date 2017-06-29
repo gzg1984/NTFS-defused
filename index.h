@@ -89,8 +89,7 @@ extern ntfs_index_context *ntfs_index_ctx_get(ntfs_inode *idx_ni);
 extern void ntfs_index_ctx_put(ntfs_index_context *ictx);
 
 extern int ntfs_lookup_inode_by_key (const void *key, const int key_len, ntfs_index_context *ictx);
-extern int ntfs_index_lookup(const void *key, const int key_len,
-		ntfs_index_context *ictx);
+extern int ntfs_index_lookup(const void *key, const int key_len, ntfs_index_context *ictx);
 
 #ifdef NTFS_RW
 
@@ -112,9 +111,16 @@ extern int ntfs_index_lookup(const void *key, const int key_len,
 static inline void ntfs_index_entry_flush_dcache_page(ntfs_index_context *ictx)
 {
 	if (ictx->is_in_root)
+	{
+		ntfs_debug("ictx->actx->ntfs_ino[%p]",ictx->actx->ntfs_ino);
 		flush_dcache_mft_record_page(ictx->actx->ntfs_ino);
+	}
 	else
+	{
+		ntfs_debug("ictx->page[%p]",ictx->page);
 		flush_dcache_page(ictx->page);
+	}
+	ntfs_debug("done");
 }
 
 /**

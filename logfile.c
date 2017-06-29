@@ -26,7 +26,6 @@
 #include <linux/highmem.h>
 #include <linux/buffer_head.h>
 #include <linux/bitops.h>
-#include <linux/log2.h>
 
 #include "attrib.h"
 #include "aops.h"
@@ -66,7 +65,7 @@ static bool ntfs_check_restart_page_header(struct inode *vi,
 			logfile_log_page_size < NTFS_BLOCK_SIZE ||
 			logfile_system_page_size &
 			(logfile_system_page_size - 1) ||
-			!is_power_of_2(logfile_log_page_size)) {
+			logfile_log_page_size & (logfile_log_page_size - 1)) {
 		ntfs_error(vi->i_sb, "$LogFile uses unsupported page size.");
 		return false;
 	}
@@ -338,7 +337,7 @@ err_out:
  * copy of the complete multi sector transfer deprotected page.  On failure,
  * *@wrp is undefined.
  *
- * Simillarly, if @lsn is not NULL, on success *@lsn will be set to the current
+ * Simillarly, if @lsn is not NULL, on succes *@lsn will be set to the current
  * logfile lsn according to this restart page.  On failure, *@lsn is undefined.
  *
  * The following error codes are defined:
@@ -669,7 +668,7 @@ err_out:
  * of cases where we think that a volume is dirty when in fact it is clean.
  * This should only affect volumes that have not been shutdown cleanly but did
  * not have any pending, non-check-pointed i/o, i.e. they were completely idle
- * at least for the five seconds preceding the unclean shutdown.
+ * at least for the five seconds preceeding the unclean shutdown.
  *
  * This function assumes that the $LogFile journal has already been consistency
  * checked by a call to ntfs_check_logfile() and in particular if the $LogFile

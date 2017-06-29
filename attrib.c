@@ -1,7 +1,7 @@
 /**
  * attrib.c - NTFS attribute operations.  Part of the Linux-NTFS project.
  *
- * Copyright (c) 2001-2012 Anton Altaparmakov and Tuxera Inc.
+ * Copyright (c) 2001-2007 Anton Altaparmakov
  * Copyright (c) 2002 Richard Russon
  *
  * This program/include file is free software; you can redistribute it and/or
@@ -22,7 +22,6 @@
 
 #include <linux/buffer_head.h>
 #include <linux/sched.h>
-#include <linux/slab.h>
 #include <linux/swap.h>
 #include <linux/writeback.h>
 
@@ -197,7 +196,7 @@ err_out:
 	} else if (ctx_needs_reset) {
 		/*
 		 * If there is no attribute list, restoring the search context
-		 * is accomplished simply by copying the saved context back over
+		 * is acomplished simply by copying the saved context back over
 		 * the caller supplied context.  If there is an attribute list,
 		 * things are more complicated as we need to deal with mapping
 		 * of mft records and resulting potential changes in pointers.
@@ -345,10 +344,10 @@ LCN ntfs_attr_vcn_to_lcn_nolock(ntfs_inode *ni, const VCN vcn,
 	unsigned long flags;
 	bool is_retry = false;
 
-	BUG_ON(!ni);
 	ntfs_debug("Entering for i_ino 0x%lx, vcn 0x%llx, %s_locked.",
 			ni->mft_no, (unsigned long long)vcn,
 			write_locked ? "write" : "read");
+	BUG_ON(!ni);
 	BUG_ON(!NInoNonResident(ni));
 	BUG_ON(vcn < 0);
 	if (!ni->runlist.rl) {
@@ -469,9 +468,9 @@ runlist_element *ntfs_attr_find_vcn_nolock(ntfs_inode *ni, const VCN vcn,
 	int err = 0;
 	bool is_retry = false;
 
-	BUG_ON(!ni);
 	ntfs_debug("Entering for i_ino 0x%lx, vcn 0x%llx, with%s ctx.",
 			ni->mft_no, (unsigned long long)vcn, ctx ? "" : "out");
+	BUG_ON(!ni);
 	BUG_ON(!NInoNonResident(ni));
 	BUG_ON(vcn < 0);
 	if (!ni->runlist.rl) {
@@ -600,7 +599,8 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 	 * attribute following that, if @ctx->is_first is 'true'.
 	 */
 	ntfs_debug("Entering. type=[0x%x] is_first[%d]", type,ctx->is_first);
-	if (ctx->is_first) {
+	if (ctx->is_first) 
+	{
 		a = ctx->attr;
 		ctx->is_first = false;
 	} 
@@ -610,7 +610,16 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 				le32_to_cpu(ctx->attr->length));
 	}
 
-	for (;;	a = (ATTR_RECORD*)((u8*)a + le32_to_cpu(a->length))) {
+	for (;;	a = (ATTR_RECORD*)((u8*)a + le32_to_cpu(a->length))) 
+	{
+		/* if it re-appear in future
+		if(le32_to_cpu(a->length) & 0xFFFF0000 )
+		{
+			ntfs_error_attr(vol->sb,a);
+			a->length = a->length & 0x0000FFFF ;
+			ntfs_error_attr(vol->sb,a);
+		}
+		*/
 		if ((u8*)a < (u8*)ctx->mrec || (u8*)a > (u8*)ctx->mrec +
 				le32_to_cpu(ctx->mrec->bytes_allocated))
 		{
@@ -619,36 +628,45 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 						"a[%p],ctx->mrec[%p],ctx->mrec->bytes_allocated[%d]"
 						,type,a->type,a->length,
 						a,ctx->mrec,le32_to_cpu(ctx->mrec->bytes_allocated));
+
 			break;
 		}
 		ctx->attr = a;
+/*Gzged add */
 		if (type != AT_UNUSED)
 		{
-		if (unlikely(le32_to_cpu(a->type) > le32_to_cpu(type) ||
-				a->type == AT_END))
-			return -ENOENT;
+			if (unlikely(le32_to_cpu(a->type) > le32_to_cpu(type) ||
+					a->type == AT_END))
+				return -ENOENT;
 		}
+/*Gzged add */
 		else
 		{
 			if ( a->type == AT_END)
 				return -ENOENT;
 		}
-
 		if (unlikely(!a->length))
 			break;
+/*Gzged add */
+		if (type == AT_UNUSED)
+			return 0;
+/*Gzged add end */
 		if (a->type != type)
 			continue;
 		/*
 		 * If @name is present, compare the two names.  If @name is
 		 * missing, assume we want an unnamed attribute.
 		 */
-		if (!name) {
+		if (!name) 
+		{
 			/* The search failed if the found attribute is named. */
 			if (a->name_length)
 				return -ENOENT;
-		} else if (!ntfs_are_names_equal(name, name_len,
+		} 
+		else if (!ntfs_are_names_equal(name, name_len,
 			    (ntfschar*)((u8*)a + le16_to_cpu(a->name_offset)),
-			    a->name_length, ic, upcase, upcase_len)) {
+			    a->name_length, ic, upcase, upcase_len)) 
+		{
 			register int rc;
 
 			rc = ntfs_collate_names(name, name_len,
@@ -681,11 +699,13 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 		 * and are done.
 		 */
 		if (!val)
+		{
 			return 0;
+		}
 		/* @val is present; compare values. */
-		else {
+		else 
+		{
 			register int rc;
-
 			rc = memcmp(val, (u8*)a + le16_to_cpu(
 					a->data.resident.value_offset),
 					min_t(u32, val_len, le32_to_cpu(
@@ -707,7 +727,11 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 				return -ENOENT;
 		}
 	}
-	ntfs_error(vol->sb, "Inode is corrupt.  Run chkdsk.");
+	ntfs_error(vol->sb, "Inode is corrupt.  Run chkdsk."
+					"type=[0x%x],a->type[0x%x],a->length[%d],"
+					"a[%p],ctx->mrec[%p],ctx->mrec->bytes_allocated[%d]"
+					,type,a->type,a->length,
+					a,ctx->mrec,le32_to_cpu(ctx->mrec->bytes_allocated));
 	NVolSetErrors(vol);
 	return -EIO;
 }
@@ -1202,7 +1226,7 @@ not_found:
  * for, i.e. if one wants to add the attribute to the mft record this is the
  * correct place to insert its attribute list entry into.
  *
- * When -errno != -ENOENT, an error occurred during the lookup.  @ctx->attr is
+ * When -errno != -ENOENT, an error occured during the lookup.  @ctx->attr is
  * then undefined and in particular you should not rely on it not changing.
  */
 int ntfs_attr_lookup(const ATTR_TYPE type, const ntfschar *name,
@@ -1212,19 +1236,27 @@ int ntfs_attr_lookup(const ATTR_TYPE type, const ntfschar *name,
 {
 	ntfs_inode *base_ni;
 
-	ntfs_debug("Entering.");
+	ntfs_debug("Entering.ctx->mrec[%p]",ctx->mrec);
 	BUG_ON(IS_ERR(ctx->mrec));
 	if (ctx->base_ntfs_ino)
+	{
 		base_ni = ctx->base_ntfs_ino;
+	}
 	else
+	{
 		base_ni = ctx->ntfs_ino;
+	}
 	/* Sanity check, just for debugging really. */
 	BUG_ON(!base_ni);
 	if (!NInoAttrList(base_ni) || type == AT_ATTRIBUTE_LIST)
-		return ntfs_attr_find(type, name, name_len, ic, val, val_len,
-				ctx);
+	{
+		return ntfs_attr_find(type, name, name_len, ic, val, val_len, ctx);
+	}
+	else
+	{
 	return ntfs_external_attr_find(type, name, name_len, ic, lowest_vcn,
 			val, val_len, ctx);
+	}
 }
 
 /**
@@ -1457,6 +1489,7 @@ int ntfs_attr_record_resize(MFT_RECORD *m, ATTR_RECORD *a, u32 new_size)
 {
 	BUG_ON(!m);
 	BUG_ON(!a);
+
 	ntfs_debug("Entering for new_size %u.", new_size);
 	/* Align to 8 bytes if it is not already done. */
 	if (new_size & 7)
@@ -1680,12 +1713,12 @@ int ntfs_attr_make_non_resident(ntfs_inode *ni, const u32 data_size)
 	attr_size = le32_to_cpu(a->data.resident.value_length);
 	BUG_ON(attr_size != data_size);
 	if (page && !PageUptodate(page)) {
-		kaddr = kmap_atomic(page);
+		kaddr = kmap_atomic(page, KM_USER0);
 		memcpy(kaddr, (u8*)a +
 				le16_to_cpu(a->data.resident.value_offset),
 				attr_size);
 		memset(kaddr + attr_size, 0, PAGE_CACHE_SIZE - attr_size);
-		kunmap_atomic(kaddr);
+		kunmap_atomic(kaddr, KM_USER0);
 		flush_dcache_page(page);
 		SetPageUptodate(page);
 	}
@@ -1830,9 +1863,9 @@ undo_err_out:
 			sizeof(a->data.resident.reserved));
 	/* Copy the data from the page back to the attribute value. */
 	if (page) {
-		kaddr = kmap_atomic(page);
+		kaddr = kmap_atomic(page, KM_USER0);
 		memcpy((u8*)a + mp_ofs, kaddr, attr_size);
-		kunmap_atomic(kaddr);
+		kunmap_atomic(kaddr, KM_USER0);
 	}
 	/* Setup the allocated size in the ntfs inode in case it changed. */
 	write_lock_irqsave(&ni->size_lock, flags);
@@ -2564,10 +2597,10 @@ int ntfs_attr_set(ntfs_inode *ni, const s64 ofs, const s64 cnt, const u8 val)
 		size = PAGE_CACHE_SIZE;
 		if (idx == end)
 			size = end_ofs;
-		kaddr = kmap_atomic(page);
+		kaddr = kmap_atomic(page, KM_USER0);
 		memset(kaddr + start_ofs, val, size - start_ofs);
 		flush_dcache_page(page);
-		kunmap_atomic(kaddr);
+		kunmap_atomic(kaddr, KM_USER0);
 		set_page_dirty(page);
 		page_cache_release(page);
 		balance_dirty_pages_ratelimited(mapping);
@@ -2585,10 +2618,10 @@ int ntfs_attr_set(ntfs_inode *ni, const s64 ofs, const s64 cnt, const u8 val)
 					"page (index 0x%lx).", idx);
 			return -ENOMEM;
 		}
-		kaddr = kmap_atomic(page);
+		kaddr = kmap_atomic(page, KM_USER0);
 		memset(kaddr, val, PAGE_CACHE_SIZE);
 		flush_dcache_page(page);
-		kunmap_atomic(kaddr);
+		kunmap_atomic(kaddr, KM_USER0);
 		/*
 		 * If the page has buffers, mark them uptodate since buffer
 		 * state and not page state is definitive in 2.6 kernels.
@@ -2622,10 +2655,10 @@ int ntfs_attr_set(ntfs_inode *ni, const s64 ofs, const s64 cnt, const u8 val)
 					"(error, index 0x%lx).", idx);
 			return PTR_ERR(page);
 		}
-		kaddr = kmap_atomic(page);
+		kaddr = kmap_atomic(page, KM_USER0);
 		memset(kaddr, val, end_ofs);
 		flush_dcache_page(page);
-		kunmap_atomic(kaddr);
+		kunmap_atomic(kaddr, KM_USER0);
 		set_page_dirty(page);
 		page_cache_release(page);
 		balance_dirty_pages_ratelimited(mapping);

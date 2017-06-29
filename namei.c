@@ -21,9 +21,7 @@
  */
 
 #include <linux/dcache.h>
-#include <linux/exportfs.h>
 #include <linux/security.h>
-#include <linux/slab.h>
 
 #include "attrib.h"
 #include "debug.h"
@@ -101,7 +99,7 @@
  * Locking: Caller must hold i_mutex on the directory.
  */
 static struct dentry *ntfs_lookup(struct inode *dir_ino, struct dentry *dent,
-		unsigned int flags)
+		struct nameidata *nd)
 {
 	ntfs_volume *vol = NTFS_SB(dir_ino->i_sb);
 	struct inode *dent_inode;
@@ -111,15 +109,14 @@ static struct dentry *ntfs_lookup(struct inode *dir_ino, struct dentry *dent,
 	unsigned long dent_ino;
 	int uname_len;
 
-	ntfs_debug("Looking up %pd in directory inode 0x%lx.",
-			dent, dir_ino->i_ino);
+	ntfs_debug("Looking up %s in directory inode 0x%lx.",
+			dent->d_name.name, dir_ino->i_ino);
 	/* Convert the name of the dentry to Unicode. */
 	uname_len = ntfs_nlstoucs(vol, dent->d_name.name, dent->d_name.len,
 			&uname);
 	if (uname_len < 0) {
 		if (uname_len != -ENAMETOOLONG)
-			ntfs_error(vol->sb, "Failed to convert name to "
-					"Unicode.");
+			ntfs_error(vol->sb, "Failed to convert name to " "Unicode.");
 		return ERR_PTR(uname_len);
 	}
 	mref = ntfs_lookup_inode_by_name(NTFS_I(dir_ino), uname, uname_len,
@@ -917,7 +914,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	}
 	else
 	{
-		(VFS_I(ni))->i_mapping->a_ops = &ntfs_normal_aops;
+		(VFS_I(ni))->i_mapping->a_ops = &ntfs_aops;
 	}
 
 	(VFS_I(ni))->i_blocks = ni->allocated_size >> 9;
@@ -953,7 +950,7 @@ err_out:
 			ntfs_debug("Failed to free MFT record.  "
 					"Leaving inconsistent metadata. Run chkdsk.\n");
 		}
-		inode_dec_link_count(VFS_I(ni)); //(VFS_I(ni))->i_nlink--;
+		(VFS_I(ni))->i_nlink--;
 		unmap_mft_record(ni);
 		atomic_dec(&(VFS_I(ni))->i_count);
 		mrec=NULL;
@@ -977,10 +974,10 @@ ntfs_inode *ntfs_create(ntfs_inode *dir_ni, ntfschar *name, u8 name_len,
 }
 /**************************************Gzged porting from ntfs-3g *********/
 
-static int gzged_ntfs_create(struct inode *dir,
-								struct dentry *dent,
-								int mode, 
-								struct nameidata * pn __attribute__((unused)) )
+static int gzged_ntfs_create(struct inode *dir, 
+		struct dentry *dent, 
+		int mode, 
+		bool __b  __attribute__((unused)) )
 {
 	ntfschar *uname;
 	int uname_len;
@@ -1635,11 +1632,12 @@ static int gzged_ntfs_unlink(struct inode *pi,struct dentry *pd)
 	else
 	{
 		(VFS_I(ni))->i_ctime = pi->i_ctime;
-		inode_dec_link_count(VFS_I(ni)); //(VFS_I(ni))->i_nlink--;
+		(VFS_I(ni))->i_nlink--;
 		ntfs_debug("Done");
 		return  err;
 	}
 }
+
 /**
  * Inode operations for directories.
  */
@@ -1649,126 +1647,3 @@ const struct inode_operations ntfs_dir_inode_ops = {
 	.unlink = gzged_ntfs_unlink,
 };
 
-/**
- * ntfs_get_parent - find the dentry of the parent of a given directory dentry
- * @child_dent:		dentry of the directory whose parent directory to find
- *
- * Find the dentry for the parent directory of the directory specified by the
- * dentry @child_dent.  This function is called from
- * fs/exportfs/expfs.c::find_exported_dentry() which in turn is called from the
- * default ->decode_fh() which is export_decode_fh() in the same file.
- *
- * The code is based on the ext3 ->get_parent() implementation found in
- * fs/ext3/namei.c::ext3_get_parent().
- *
- * Note: ntfs_get_parent() is called with @d_inode(child_dent)->i_mutex down.
- *
- * Return the dentry of the parent directory on success or the error code on
- * error (IS_ERR() is true).
- */
-static struct dentry *ntfs_get_parent(struct dentry *child_dent)
-{
-	struct inode *vi = d_inode(child_dent);
-	ntfs_inode *ni = NTFS_I(vi);
-	MFT_RECORD *mrec;
-	ntfs_attr_search_ctx *ctx;
-	ATTR_RECORD *attr;
-	FILE_NAME_ATTR *fn;
-	unsigned long parent_ino;
-	int err;
-
-	ntfs_debug("Entering for inode 0x%lx.", vi->i_ino);
-	/* Get the mft record of the inode belonging to the child dentry. */
-	mrec = map_mft_record(ni);
-	if (IS_ERR(mrec))
-		return (struct dentry *)mrec;
-	/* Find the first file name attribute in the mft record. */
-	ctx = ntfs_attr_get_search_ctx(ni, mrec);
-	if (unlikely(!ctx)) {
-		unmap_mft_record(ni);
-		return ERR_PTR(-ENOMEM);
-	}
-try_next:
-	err = ntfs_attr_lookup(AT_FILE_NAME, NULL, 0, CASE_SENSITIVE, 0, NULL,
-			0, ctx);
-	if (unlikely(err)) {
-		ntfs_attr_put_search_ctx(ctx);
-		unmap_mft_record(ni);
-		if (err == -ENOENT)
-			ntfs_error(vi->i_sb, "Inode 0x%lx does not have a "
-					"file name attribute.  Run chkdsk.",
-					vi->i_ino);
-		return ERR_PTR(err);
-	}
-	attr = ctx->attr;
-	if (unlikely(attr->non_resident))
-		goto try_next;
-	fn = (FILE_NAME_ATTR *)((u8 *)attr +
-			le16_to_cpu(attr->data.resident.value_offset));
-	if (unlikely((u8 *)fn + le32_to_cpu(attr->data.resident.value_length) >
-			(u8*)attr + le32_to_cpu(attr->length)))
-		goto try_next;
-	/* Get the inode number of the parent directory. */
-	parent_ino = MREF_LE(fn->parent_directory);
-	/* Release the search context and the mft record of the child. */
-	ntfs_attr_put_search_ctx(ctx);
-	unmap_mft_record(ni);
-
-	return d_obtain_alias(ntfs_iget(vi->i_sb, parent_ino));
-}
-
-static struct inode *ntfs_nfs_get_inode(struct super_block *sb,
-		u64 ino, u32 generation)
-{
-	struct inode *inode;
-
-	inode = ntfs_iget(sb, ino);
-	if (!IS_ERR(inode)) {
-		if (is_bad_inode(inode) || inode->i_generation != generation) {
-			iput(inode);
-			inode = ERR_PTR(-ESTALE);
-		}
-	}
-
-	return inode;
-}
-
-static struct dentry *ntfs_fh_to_dentry(struct super_block *sb, struct fid *fid,
-		int fh_len, int fh_type)
-{
-	return generic_fh_to_dentry(sb, fid, fh_len, fh_type,
-				    ntfs_nfs_get_inode);
-}
-
-static struct dentry *ntfs_fh_to_parent(struct super_block *sb, struct fid *fid,
-		int fh_len, int fh_type)
-{
-	return generic_fh_to_parent(sb, fid, fh_len, fh_type,
-				    ntfs_nfs_get_inode);
-}
-
-/**
- * Export operations allowing NFS exporting of mounted NTFS partitions.
- *
- * We use the default ->encode_fh() for now.  Note that they
- * use 32 bits to store the inode number which is an unsigned long so on 64-bit
- * architectures is usually 64 bits so it would all fail horribly on huge
- * volumes.  I guess we need to define our own encode and decode fh functions
- * that store 64-bit inode numbers at some point but for now we will ignore the
- * problem...
- *
- * We also use the default ->get_name() helper (used by ->decode_fh() via
- * fs/exportfs/expfs.c::find_exported_dentry()) as that is completely fs
- * independent.
- *
- * The default ->get_parent() just returns -EACCES so we have to provide our
- * own and the default ->get_dentry() is incompatible with NTFS due to not
- * allowing the inode number 0 which is used in NTFS for the system file $MFT
- * and due to using iget() whereas NTFS needs ntfs_iget().
- */
-const struct export_operations ntfs_export_ops = {
-	.get_parent	= ntfs_get_parent,	/* Find the parent of a given
-						   directory. */
-	.fh_to_dentry	= ntfs_fh_to_dentry,
-	.fh_to_parent	= ntfs_fh_to_parent,
-};

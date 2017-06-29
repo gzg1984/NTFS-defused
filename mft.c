@@ -1,7 +1,7 @@
 /**
  * mft.c - NTFS kernel mft record operations. Part of the Linux-NTFS project.
  *
- * Copyright (c) 2001-2012 Anton Altaparmakov and Tuxera Inc.
+ * Copyright (c) 2001-2006 Anton Altaparmakov
  * Copyright (c) 2002 Richard Russon
  *
  * This program/include file is free software; you can redistribute it and/or
@@ -21,7 +21,6 @@
  */
 
 #include <linux/buffer_head.h>
-#include <linux/slab.h>
 #include <linux/swap.h>
 
 #include "attrib.h"
@@ -73,7 +72,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 		if (index > end_index || (i_size & ~PAGE_CACHE_MASK) < ofs +
 				vol->mft_record_size) {
 			page = ERR_PTR(-ENOENT);
-			ntfs_error(vol->sb, "Attempt to read mft record 0x%lx, "
+			ntfs_error(vol->sb, "Attemt to read mft record 0x%lx, "
 					"which is beyond the end of the mft.  "
 					"This is probably a bug in the ntfs "
 					"driver.", ni->mft_no);
@@ -84,7 +83,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 	page = ntfs_map_page(mft_vi->i_mapping, index);
 	if (likely(!IS_ERR(page))) {
 		/* Catch multi sector transfer fixup errors. */
-		if (likely(ntfs_is_mft_recordp((le32*)(page_address(page) +
+		if (likely(ntfs_is_mft_recordp((le32*)(page_address(page) + 
 				ofs)))) {
 			ni->page = page;
 			ni->page_ofs = ofs;
@@ -190,12 +189,14 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
  */
 static inline void unmap_mft_record_page(ntfs_inode *ni)
 {
+	ntfs_debug("Entering for mft_no 0x%lx.", ni->mft_no);
 	BUG_ON(!ni->page);
 
 	// TODO: If dirty, blah...
 	ntfs_unmap_page(ni->page);
 	ni->page = NULL;
 	ni->page_ofs = 0;
+	ntfs_debug("Done .");
 	return;
 }
 
@@ -385,12 +386,13 @@ unm_err_out:
  * it is dirty in the inode meta data rather than the data page cache of the
  * inode, and thus there are no data pages that need writing out.  Therefore, a
  * full mark_inode_dirty() is overkill.  A mark_inode_dirty_sync(), on the
- * other hand, is not sufficient, because ->write_inode needs to be called even
- * in case of fdatasync. This needs to happen or the file data would not
- * necessarily hit the device synchronously, even though the vfs inode has the
- * O_SYNC flag set.  Also, I_DIRTY_DATASYNC simply "feels" better than just
- * I_DIRTY_SYNC, since the file data has not actually hit the block device yet,
- * which is not what I_DIRTY_SYNC on its own would suggest.
+ * other hand, is not sufficient, because I_DIRTY_DATASYNC needs to be set to
+ * ensure ->write_inode is called from generic_osync_inode() and this needs to
+ * happen or the file data would not necessarily hit the device synchronously,
+ * even though the vfs inode has the O_SYNC flag set.  Also, I_DIRTY_DATASYNC
+ * simply "feels" better than just I_DIRTY_SYNC, since the file data has not
+ * actually hit the block device yet, which is not what I_DIRTY_SYNC on its own
+ * would suggest.
  */
 void __mark_mft_record_dirty(ntfs_inode *ni)
 {
@@ -1367,7 +1369,7 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(ntfs_volume *vol)
 			ntfs_error(vol->sb, "Failed to merge runlists for mft "
 					"bitmap.");
 			if (ntfs_cluster_free_from_rl(vol, rl2)) {
-				ntfs_error(vol->sb, "Failed to deallocate "
+				ntfs_error(vol->sb, "Failed to dealocate "
 						"allocated cluster.%s", es);
 				NVolSetErrors(vol);
 			}
@@ -1442,7 +1444,7 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(ntfs_volume *vol)
 		// Note: It will need to be a special mft record and if none of
 		// those are available it gets rather complicated...
 		ntfs_error(vol->sb, "Not enough space in this mft record to "
-				"accommodate extended mft bitmap attribute "
+				"accomodate extended mft bitmap attribute "
 				"extent.  Cannot handle this yet.");
 		ret = -EOPNOTSUPP;
 		goto undo_alloc;
@@ -1805,7 +1807,7 @@ static int ntfs_mft_data_extend_allocation_nolock(ntfs_volume *vol)
 		ntfs_error(vol->sb, "Failed to merge runlists for mft data "
 				"attribute.");
 		if (ntfs_cluster_free_from_rl(vol, rl2)) {
-			ntfs_error(vol->sb, "Failed to deallocate clusters "
+			ntfs_error(vol->sb, "Failed to dealocate clusters "
 					"from the mft data attribute.%s", es);
 			NVolSetErrors(vol);
 		}
@@ -1879,7 +1881,7 @@ static int ntfs_mft_data_extend_allocation_nolock(ntfs_volume *vol)
 		// and we would then need to update all references to this mft
 		// record appropriately.  This is rather complicated...
 		ntfs_error(vol->sb, "Not enough space in this mft record to "
-				"accommodate extended mft data attribute "
+				"accomodate extended mft data attribute "
 				"extent.  Cannot handle this yet.");
 		ret = -EOPNOTSUPP;
 		goto undo_alloc;
@@ -2109,7 +2111,10 @@ static int ntfs_mft_record_format(const ntfs_volume *vol, const s64 mft_no)
 	i_size = i_size_read(mft_vi);
 	end_index = i_size >> PAGE_CACHE_SHIFT;
 	if (unlikely(index >= end_index)) {
+/********* Gzged changed
 		if (unlikely(index > end_index || ofs + vol->mft_record_size >=
+		**********/
+		if (unlikely(index > end_index || ofs + vol->mft_record_size >
 				(i_size & ~PAGE_CACHE_MASK))) {
 			ntfs_error(vol->sb, "Tried to format non-existing mft "
 					"record 0x%llx.", (long long)mft_no);
@@ -2300,14 +2305,14 @@ ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, const int mode,
 	read_lock_irqsave(&mftbmp_ni->size_lock, flags);
 	old_data_initialized = mftbmp_ni->initialized_size;
 	read_unlock_irqrestore(&mftbmp_ni->size_lock, flags);
-	if (old_data_initialized << 3 > ll && old_data_initialized > 3) {
+	if (old_data_initialized << 3 > ll && old_data_initialized > 3) 
+	{
 		bit = ll;
 		if (bit < 24)
 			bit = 24;
 		if (unlikely(bit >= (1ll << 32)))
 			goto max_err_out;
-		ntfs_debug("Found free record (#2), bit 0x%llx.",
-				(long long)bit);
+		ntfs_debug("Found free record (#2), bit 0x%llx.", (long long)bit);
 		goto found_free_rec;
 	}
 	/*
@@ -2326,7 +2331,8 @@ ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, const int mode,
 			(long long)i_size_read(vol->mftbmp_ino),
 			(long long)old_data_initialized);
 	read_unlock_irqrestore(&mftbmp_ni->size_lock, flags);
-	if (old_data_initialized + 8 > old_data_size) {
+	if (old_data_initialized + 8 > old_data_size) 
+	{
 		/* Need to extend bitmap by one more cluster. */
 		ntfs_debug("mftbmp: initialized_size + 8 > allocated_size.");
 		err = ntfs_mft_bitmap_extend_allocation_nolock(vol);
@@ -2357,7 +2363,7 @@ ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, const int mode,
 	}
 #ifdef DEBUG
 	read_lock_irqsave(&mftbmp_ni->size_lock, flags);
-	ntfs_debug("Status of mftbmp after initialized extension: "
+	ntfs_debug("Status of mftbmp after initialized extention: "
 			"allocated_size 0x%llx, data_size 0x%llx, "
 			"initialized_size 0x%llx.",
 			(long long)mftbmp_ni->allocated_size,
@@ -2576,8 +2582,6 @@ mft_rec_already_initialized:
 	flush_dcache_page(page);
 	SetPageUptodate(page);
 	if (base_ni) {
-		MFT_RECORD *m_tmp;
-
 		/*
 		 * Setup the base mft record in the extent mft record.  This
 		 * completes initialization of the allocated extent mft record
@@ -2590,11 +2594,11 @@ mft_rec_already_initialized:
 		 * attach it to the base inode @base_ni and map, pin, and lock
 		 * its, i.e. the allocated, mft record.
 		 */
-		m_tmp = map_extent_mft_record(base_ni, bit, &ni);
-		if (IS_ERR(m_tmp)) {
+		m = map_extent_mft_record(base_ni, bit, &ni);
+		if (IS_ERR(m)) {
 			ntfs_error(vol->sb, "Failed to map allocated extent "
 					"mft record 0x%llx.", (long long)bit);
-			err = PTR_ERR(m_tmp);
+			err = PTR_ERR(m);
 			/* Set the mft record itself not in use. */
 			m->flags &= cpu_to_le16(
 					~le16_to_cpu(MFT_RECORD_IN_USE));
@@ -2605,7 +2609,6 @@ mft_rec_already_initialized:
 			ntfs_unmap_page(page);
 			goto undo_mftbmp_alloc;
 		}
-		BUG_ON(m != m_tmp);
 		/*
 		 * Make sure the allocated mft record is written out to disk.
 		 * No need to set the inode dirty because the caller is going
@@ -2914,6 +2917,10 @@ rollback:
 	mark_mft_record_dirty(ni);
 	return err;
 }
+
+
+
+
 /**
  * ntfs_mft_record_free - free an mft record on an ntfs volume
  * @vol:	volume on which to free the mft record

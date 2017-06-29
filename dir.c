@@ -21,7 +21,6 @@
  */
 
 #include <linux/buffer_head.h>
-#include <linux/slab.h>
 
 #include "dir.h"
 #include "aops.h"
@@ -1608,11 +1607,13 @@ dir_err_out:
 /**
  * ntfs_filldir - ntfs specific filldir method
  * @vol:	current ntfs volume
+ * @fpos:	position in the directory
  * @ndir:	ntfs inode of current directory
  * @ia_page:	page in which the index allocation buffer @ie is in resides
  * @ie:		current index entry
  * @name:	buffer to use for the converted name
- * @actor:	what to feed the entries to
+ * @dirent:	vfs filldir callback context
+ * @filldir:	vfs filldir callback
  *
  * Convert the Unicode @name to the loaded NLS and pass it to the @filldir
  * callback.
@@ -1626,12 +1627,12 @@ dir_err_out:
  * retake the lock if we are returning a non-zero value as ntfs_readdir()
  * would need to drop the lock immediately anyway.
  */
-static inline int ntfs_filldir(ntfs_volume *vol,
+static inline int ntfs_filldir(ntfs_volume *vol, loff_t fpos,
 		ntfs_inode *ndir, struct page *ia_page, INDEX_ENTRY *ie,
-		u8 *name, struct dir_context *actor)
+		u8 *name, void *dirent, filldir_t filldir)
 {
 	unsigned long mref;
-	int name_len;
+	int name_len, rc;
 	unsigned dt_type;
 	FILE_NAME_TYPE_FLAGS name_type;
 
@@ -1670,14 +1671,13 @@ static inline int ntfs_filldir(ntfs_volume *vol,
 	if (ia_page)
 		unlock_page(ia_page);
 	ntfs_debug("Calling filldir for %s with len %i, fpos 0x%llx, inode "
-			"0x%lx, DT_%s.", name, name_len, actor->pos, mref,
+			"0x%lx, DT_%s.", name, name_len, fpos, mref,
 			dt_type == DT_DIR ? "DIR" : "REG");
-	if (!dir_emit(actor, name, name_len, mref, dt_type))
-		return 1;
+	rc = filldir(dirent, name, name_len, fpos, mref, dt_type);
 	/* Relock the page but not if we are aborting ->readdir. */
-	if (ia_page)
+	if (!rc && ia_page)
 		lock_page(ia_page);
-	return 0;
+	return rc;
 }
 
 /*
@@ -1700,11 +1700,11 @@ static inline int ntfs_filldir(ntfs_volume *vol,
  *	       removes them again after the write is complete after which it 
  *	       unlocks the page.
  */
-static int ntfs_readdir(struct file *file, struct dir_context *actor)
+static int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
 	s64 ia_pos, ia_start, prev_ia_pos, bmp_pos;
-	loff_t i_size;
-	struct inode *bmp_vi, *vdir = file_inode(file);
+	loff_t fpos, i_size;
+	struct inode *bmp_vi, *vdir = filp->f_dentry->d_inode;
 	struct super_block *sb = vdir->i_sb;
 	ntfs_inode *ndir = NTFS_I(vdir);
 	ntfs_volume *vol = NTFS_SB(sb);
@@ -1719,16 +1719,33 @@ static int ntfs_readdir(struct file *file, struct dir_context *actor)
 	u8 *kaddr, *bmp, *index_end;
 	ntfs_attr_search_ctx *ctx;
 
+	fpos = filp->f_pos;
 	ntfs_debug("Entering for inode 0x%lx, fpos 0x%llx.",
-			vdir->i_ino, actor->pos);
+			vdir->i_ino, fpos);
 	rc = err = 0;
 	/* Are we at end of dir yet? */
 	i_size = i_size_read(vdir);
-	if (actor->pos >= i_size + vol->mft_record_size)
-		return 0;
+	if (fpos >= i_size + vol->mft_record_size)
+		goto done;
 	/* Emulate . and .. for all directories. */
-	if (!dir_emit_dots(file, actor))
-		return 0;
+	if (!fpos) {
+		ntfs_debug("Calling filldir for . with len 1, fpos 0x0, "
+				"inode 0x%lx, DT_DIR.", vdir->i_ino);
+		rc = filldir(dirent, ".", 1, fpos, vdir->i_ino, DT_DIR);
+		if (rc)
+			goto done;
+		fpos++;
+	}
+	if (fpos == 1) {
+		ntfs_debug("Calling filldir for .. with len 2, fpos 0x1, "
+				"inode 0x%lx, DT_DIR.",
+				(unsigned long)parent_ino(filp->f_dentry));
+		rc = filldir(dirent, "..", 2, fpos,
+				parent_ino(filp->f_dentry), DT_DIR);
+		if (rc)
+			goto done;
+		fpos++;
+	}
 	m = NULL;
 	ctx = NULL;
 	/*
@@ -1741,7 +1758,7 @@ static int ntfs_readdir(struct file *file, struct dir_context *actor)
 		goto err_out;
 	}
 	/* Are we jumping straight into the index allocation attribute? */
-	if (actor->pos >= vol->mft_record_size)
+	if (fpos >= vol->mft_record_size)
 		goto skip_index_root;
 	/* Get hold of the mft record for the directory. */
 	m = map_mft_record(ndir);
@@ -1756,7 +1773,7 @@ static int ntfs_readdir(struct file *file, struct dir_context *actor)
 		goto err_out;
 	}
 	/* Get the offset into the index root attribute. */
-	ir_pos = (s64)actor->pos;
+	ir_pos = (s64)fpos;
 	/* Find the index root attribute in the mft record. */
 	err = ntfs_attr_lookup(AT_INDEX_ROOT, I30, 4, CASE_SENSITIVE, 0, NULL,
 			0, ctx);
@@ -1812,9 +1829,10 @@ static int ntfs_readdir(struct file *file, struct dir_context *actor)
 		if (ir_pos > (u8*)ie - (u8*)ir)
 			continue;
 		/* Advance the position even if going to skip the entry. */
-		actor->pos = (u8*)ie - (u8*)ir;
+		fpos = (u8*)ie - (u8*)ir;
 		/* Submit the name to the filldir callback. */
-		rc = ntfs_filldir(vol, ndir, NULL, ie, name, actor);
+		rc = ntfs_filldir(vol, fpos, ndir, NULL, ie, name, dirent,
+				filldir);
 		if (rc) {
 			kfree(ir);
 			goto abort;
@@ -1827,12 +1845,12 @@ static int ntfs_readdir(struct file *file, struct dir_context *actor)
 	if (!NInoIndexAllocPresent(ndir))
 		goto EOD;
 	/* Advance fpos to the beginning of the index allocation. */
-	actor->pos = vol->mft_record_size;
+	fpos = vol->mft_record_size;
 skip_index_root:
 	kaddr = NULL;
 	prev_ia_pos = -1LL;
 	/* Get the offset into the index allocation attribute. */
-	ia_pos = (s64)actor->pos - vol->mft_record_size;
+	ia_pos = (s64)fpos - vol->mft_record_size;
 	ia_mapping = vdir->i_mapping;
 	ntfs_debug("Inode 0x%lx, getting index bitmap.", vdir->i_ino);
 	bmp_vi = ntfs_attr_iget(vdir, AT_BITMAP, I30, 4);
@@ -1994,7 +2012,7 @@ find_next_index_buffer:
 		if (ia_pos - ia_start > (u8*)ie - (u8*)ia)
 			continue;
 		/* Advance the position even if going to skip the entry. */
-		actor->pos = (u8*)ie - (u8*)ia +
+		fpos = (u8*)ie - (u8*)ia +
 				(sle64_to_cpu(ia->index_block_vcn) <<
 				ndir->itype.index.vcn_size_bits) +
 				vol->mft_record_size;
@@ -2004,7 +2022,8 @@ find_next_index_buffer:
 		 * before returning, unless a non-zero value is returned in
 		 * which case the page is left unlocked.
 		 */
-		rc = ntfs_filldir(vol, ndir, ia_page, ie, name, actor);
+		rc = ntfs_filldir(vol, fpos, ndir, ia_page, ie, name, dirent,
+				filldir);
 		if (rc) {
 			/* @ia_page is already unlocked in this case. */
 			ntfs_unmap_page(ia_page);
@@ -2023,9 +2042,18 @@ unm_EOD:
 	iput(bmp_vi);
 EOD:
 	/* We are finished, set fpos to EOD. */
-	actor->pos = i_size + vol->mft_record_size;
+	fpos = i_size + vol->mft_record_size;
 abort:
 	kfree(name);
+done:
+#ifdef DEBUG
+	if (!rc)
+		ntfs_debug("EOD, fpos 0x%llx, returning 0.", fpos);
+	else
+		ntfs_debug("filldir returned %i, fpos 0x%llx, returning 0.",
+				rc, fpos);
+#endif
+	filp->f_pos = fpos;
 	return 0;
 err_out:
 	if (bmp_page) {
@@ -2046,6 +2074,7 @@ iput_err_out:
 	if (!err)
 		err = -EIO;
 	ntfs_debug("Failed. Returning error code %i.", -err);
+	filp->f_pos = fpos;
 	return err;
 }
 
@@ -2101,20 +2130,14 @@ static int ntfs_dir_open(struct inode *vi, struct file *filp)
  * this problem for now.  We do write the $BITMAP attribute if it is present
  * which is the important one for a directory so things are not too bad.
  */
-static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
-			  int datasync)
+static int ntfs_dir_fsync(struct file *filp, struct dentry *dentry,
+		int datasync)
 {
-	struct inode *bmp_vi, *vi = filp->f_mapping->host;
+	struct inode *bmp_vi, *vi = dentry->d_inode;
 	int err, ret;
 	ntfs_attr na;
 
 	ntfs_debug("Entering for inode 0x%lx.", vi->i_ino);
-
-	err = filemap_write_and_wait_range(vi->i_mapping, start, end);
-	if (err)
-		return err;
-	mutex_lock(&vi->i_mutex);
-
 	BUG_ON(!S_ISDIR(vi->i_mode));
 	/* If the bitmap attribute inode is in memory sync it, too. */
 	na.mft_no = vi->i_ino;
@@ -2126,7 +2149,7 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
  		write_inode_now(bmp_vi, !datasync);
 		iput(bmp_vi);
 	}
-	ret = __ntfs_write_inode(vi, 1);
+	ret = ntfs_write_inode(vi, 1);
 	write_inode_now(vi, !datasync);
 	err = sync_blockdev(vi->i_sb->s_bdev);
 	if (unlikely(err && !ret))
@@ -2136,7 +2159,6 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 	else
 		ntfs_warning(vi->i_sb, "Failed to f%ssync inode 0x%lx.  Error "
 				"%u.", datasync ? "data" : "", vi->i_ino, -ret);
-	mutex_unlock(&vi->i_mutex);
 	return ret;
 }
 
@@ -2145,7 +2167,7 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 const struct file_operations ntfs_dir_ops = {
 	.llseek		= generic_file_llseek,	/* Seek inside directory. */
 	.read		= generic_read_dir,	/* Return -EISDIR. */
-	.iterate	= ntfs_readdir,		/* Read directory contents. */
+	.readdir	= ntfs_readdir,		/* Read directory contents. */
 #ifdef NTFS_RW
 	.fsync		= ntfs_dir_fsync,	/* Sync a directory to disk. */
 	/*.aio_fsync	= ,*/			/* Sync all outstanding async

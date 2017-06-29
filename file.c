@@ -1,7 +1,7 @@
 /*
  * file.c - NTFS kernel file operations.  Part of the Linux-NTFS project.
  *
- * Copyright (c) 2001-2015 Anton Altaparmakov and Tuxera Inc.
+ * Copyright (c) 2001-2007 Anton Altaparmakov
  *
  * This program/include file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as published
@@ -19,9 +19,7 @@
  * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <linux/backing-dev.h>
 #include <linux/buffer_head.h>
-#include <linux/gfp.h>
 #include <linux/pagemap.h>
 #include <linux/pagevec.h>
 #include <linux/sched.h>
@@ -74,6 +72,8 @@ static int ntfs_file_open(struct inode *vi, struct file *filp)
  * ntfs_attr_extend_initialized - extend the initialized size of an attribute
  * @ni:			ntfs inode of the attribute to extend
  * @new_init_size:	requested new initialized size in bytes
+ * @cached_page:	store any allocated but unused page here
+ * @lru_pvec:		lru-buffering pagevec of the caller
  *
  * Extend the initialized size of an attribute described by the ntfs inode @ni
  * to @new_init_size bytes.  This involves zeroing any non-sparse space between
@@ -97,6 +97,9 @@ static int ntfs_file_open(struct inode *vi, struct file *filp)
  * the page at all.  For a more detailed explanation see ntfs_truncate() in
  * fs/ntfs/inode.c.
  *
+ * @cached_page and @lru_pvec are just optimizations for dealing with multiple
+ * pages.
+ *
  * Return 0 on success and -errno on error.  In the case that an error is
  * encountered it is possible that the initialized size will already have been
  * incremented some way towards @new_init_size but it is guaranteed that if
@@ -106,7 +109,8 @@ static int ntfs_file_open(struct inode *vi, struct file *filp)
  * Locking: i_mutex on the vfs inode corrseponsind to the ntfs inode @ni must be
  *	    held by the caller.
  */
-static int ntfs_attr_extend_initialized(ntfs_inode *ni, const s64 new_init_size)
+static int ntfs_attr_extend_initialized(ntfs_inode *ni, const s64 new_init_size,
+		struct page **cached_page, struct pagevec *lru_pvec)
 {
 	s64 old_init_size;
 	loff_t old_i_size;
@@ -328,166 +332,62 @@ err_out:
 	return err;
 }
 
-static ssize_t ntfs_prepare_file_for_write(struct kiocb *iocb,
-		struct iov_iter *from)
+/**
+ * ntfs_fault_in_pages_readable -
+ *
+ * Fault a number of userspace pages into pagetables.
+ *
+ * Unlike include/linux/pagemap.h::fault_in_pages_readable(), this one copes
+ * with more than two userspace pages as well as handling the single page case
+ * elegantly.
+ *
+ * If you find this difficult to understand, then think of the while loop being
+ * the following code, except that we do without the integer variable ret:
+ *
+ *	do {
+ *		ret = __get_user(c, uaddr);
+ *		uaddr += PAGE_SIZE;
+ *	} while (!ret && uaddr < end);
+ *
+ * Note, the final __get_user() may well run out-of-bounds of the user buffer,
+ * but _not_ out-of-bounds of the page the user buffer belongs to, and since
+ * this is only a read and not a write, and since it is still in the same page,
+ * it should not matter and this makes the code much simpler.
+ */
+static inline void ntfs_fault_in_pages_readable(const char __user *uaddr,
+		int bytes)
 {
-	loff_t pos;
-	s64 end, ll;
-	ssize_t err;
-	unsigned long flags;
-	struct file *file = iocb->ki_filp;
-	struct inode *vi = file_inode(file);
-	ntfs_inode *base_ni, *ni = NTFS_I(vi);
-	ntfs_volume *vol = ni->vol;
+	const char __user *end;
+	volatile char c;
 
-	ntfs_debug("Entering for i_ino 0x%lx, attribute type 0x%x, pos "
-			"0x%llx, count 0x%zx.", vi->i_ino,
-			(unsigned)le32_to_cpu(ni->type),
-			(unsigned long long)iocb->ki_pos,
-			iov_iter_count(from));
-	err = generic_write_checks(iocb, from);
-	if (unlikely(err <= 0))
-		goto out;
-	/*
-	 * All checks have passed.  Before we start doing any writing we want
-	 * to abort any totally illegal writes.
-	 */
-	BUG_ON(NInoMstProtected(ni));
-	BUG_ON(ni->type != AT_DATA);
-	/* If file is encrypted, deny access, just like NT4. */
-	if (NInoEncrypted(ni)) {
-		/* Only $DATA attributes can be encrypted. */
-		/*
-		 * Reminder for later: Encrypted files are _always_
-		 * non-resident so that the content can always be encrypted.
-		 */
-		ntfs_debug("Denying write access to encrypted file.");
-		err = -EACCES;
-		goto out;
-	}
-	if (NInoCompressed(ni)) {
-		/* Only unnamed $DATA attribute can be compressed. */
-		BUG_ON(ni->name_len);
-		/*
-		 * Reminder for later: If resident, the data is not actually
-		 * compressed.  Only on the switch to non-resident does
-		 * compression kick in.  This is in contrast to encrypted files
-		 * (see above).
-		 */
-		ntfs_error(vi->i_sb, "Writing to compressed files is not "
-				"implemented yet.  Sorry.");
-		err = -EOPNOTSUPP;
-		goto out;
-	}
-	base_ni = ni;
-	if (NInoAttr(ni))
-		base_ni = ni->ext.base_ntfs_ino;
-	err = file_remove_suid(file);
-	if (unlikely(err))
-		goto out;
-	/*
-	 * Our ->update_time method always succeeds thus file_update_time()
-	 * cannot fail either so there is no need to check the return code.
-	 */
-	file_update_time(file);
-	pos = iocb->ki_pos;
-	/* The first byte after the last cluster being written to. */
-	end = (pos + iov_iter_count(from) + vol->cluster_size_mask) &
-			~(u64)vol->cluster_size_mask;
-	/*
-	 * If the write goes beyond the allocated size, extend the allocation
-	 * to cover the whole of the write, rounded up to the nearest cluster.
-	 */
-	read_lock_irqsave(&ni->size_lock, flags);
-	ll = ni->allocated_size;
-	read_unlock_irqrestore(&ni->size_lock, flags);
-	if (end > ll) {
-		/*
-		 * Extend the allocation without changing the data size.
-		 *
-		 * Note we ensure the allocation is big enough to at least
-		 * write some data but we do not require the allocation to be
-		 * complete, i.e. it may be partial.
-		 */
-		ll = ntfs_attr_extend_allocation(ni, end, -1, pos);
-		if (likely(ll >= 0)) {
-			BUG_ON(pos >= ll);
-			/* If the extension was partial truncate the write. */
-			if (end > ll) {
-				ntfs_debug("Truncating write to inode 0x%lx, "
-						"attribute type 0x%x, because "
-						"the allocation was only "
-						"partially extended.",
-						vi->i_ino, (unsigned)
-						le32_to_cpu(ni->type));
-				iov_iter_truncate(from, ll - pos);
-			}
-		} else {
-			err = ll;
-			read_lock_irqsave(&ni->size_lock, flags);
-			ll = ni->allocated_size;
-			read_unlock_irqrestore(&ni->size_lock, flags);
-			/* Perform a partial write if possible or fail. */
-			if (pos < ll) {
-				ntfs_debug("Truncating write to inode 0x%lx "
-						"attribute type 0x%x, because "
-						"extending the allocation "
-						"failed (error %d).",
-						vi->i_ino, (unsigned)
-						le32_to_cpu(ni->type),
-						(int)-err);
-				iov_iter_truncate(from, ll - pos);
-			} else {
-				if (err != -ENOSPC)
-					ntfs_error(vi->i_sb, "Cannot perform "
-							"write to inode "
-							"0x%lx, attribute "
-							"type 0x%x, because "
-							"extending the "
-							"allocation failed "
-							"(error %ld).",
-							vi->i_ino, (unsigned)
-							le32_to_cpu(ni->type),
-							(long)-err);
-				else
-					ntfs_debug("Cannot perform write to "
-							"inode 0x%lx, "
-							"attribute type 0x%x, "
-							"because there is not "
-							"space left.",
-							vi->i_ino, (unsigned)
-							le32_to_cpu(ni->type));
-				goto out;
-			}
-		}
-	}
-	/*
-	 * If the write starts beyond the initialized size, extend it up to the
-	 * beginning of the write and initialize all non-sparse space between
-	 * the old initialized size and the new one.  This automatically also
-	 * increments the vfs inode->i_size to keep it above or equal to the
-	 * initialized_size.
-	 */
-	read_lock_irqsave(&ni->size_lock, flags);
-	ll = ni->initialized_size;
-	read_unlock_irqrestore(&ni->size_lock, flags);
-	if (pos > ll) {
-		/*
-		 * Wait for ongoing direct i/o to complete before proceeding.
-		 * New direct i/o cannot start as we hold i_mutex.
-		 */
-		inode_dio_wait(vi);
-		err = ntfs_attr_extend_initialized(ni, pos);
-		if (unlikely(err < 0))
-			ntfs_error(vi->i_sb, "Cannot perform write to inode "
-					"0x%lx, attribute type 0x%x, because "
-					"extending the initialized size "
-					"failed (error %d).", vi->i_ino,
-					(unsigned)le32_to_cpu(ni->type),
-					(int)-err);
-	}
-out:
-	return err;
+	/* Set @end to the first byte outside the last page we care about. */
+	end = (const char __user*)PAGE_ALIGN((unsigned long)uaddr + bytes);
+
+	while (!__get_user(c, uaddr) && (uaddr += PAGE_SIZE, uaddr < end))
+		;
+}
+
+/**
+ * ntfs_fault_in_pages_readable_iovec -
+ *
+ * Same as ntfs_fault_in_pages_readable() but operates on an array of iovecs.
+ */
+static inline void ntfs_fault_in_pages_readable_iovec(const struct iovec *iov,
+		size_t iov_ofs, int bytes)
+{
+	do {
+		const char __user *buf;
+		unsigned len;
+
+		buf = iov->iov_base + iov_ofs;
+		len = iov->iov_len - iov_ofs;
+		if (len > bytes)
+			len = bytes;
+		ntfs_fault_in_pages_readable(buf, len);
+		bytes -= len;
+		iov++;
+		iov_ofs = 0;
+	} while (bytes);
 }
 
 /**
@@ -497,26 +397,33 @@ out:
  * @nr_pages:	number of page cache pages to obtain
  * @pages:	array of pages in which to return the obtained page cache pages
  * @cached_page: allocated but as yet unused page
+ * @lru_pvec:	lru-buffering pagevec of caller
  *
- * Obtain @nr_pages locked page cache pages from the mapping @mapping and
+ * Obtain @nr_pages locked page cache pages from the mapping @maping and
  * starting at index @index.
  *
- * If a page is newly created, add it to lru list
+ * If a page is newly created, increment its refcount and add it to the
+ * caller's lru-buffering pagevec @lru_pvec.
+ *
+ * This is the same as mm/filemap.c::__grab_cache_page(), except that @nr_pages
+ * are obtained at once instead of just one page and that 0 is returned on
+ * success and -errno on error.
  *
  * Note, the page locks are obtained in ascending page index order.
  */
-static inline int __ntfs_grab_cache_pages(struct address_space *mapping,
-		pgoff_t index, const unsigned nr_pages, struct page **pages,
-		struct page **cached_page)
+static /*inline*/ int __ntfs_grab_cache_pages(struct address_space *mapping,
+		pgoff_t index, const unsigned nr_pages, struct page **pages /*,
+		struct page **cached_page ,struct pagevec *lru_pvec*/)
 {
 	int err, nr;
 
 	BUG_ON(!nr_pages);
 	err = nr = 0;
 	do {
-		pages[nr] = find_get_page_flags(mapping, index, FGP_LOCK |
-				FGP_ACCESSED);
-		if (!pages[nr]) {
+		pages[nr] = find_lock_page(mapping, index);
+		if (!pages[nr]) 
+		{
+			/* Gzged changed
 			if (!*cached_page) {
 				*cached_page = page_cache_alloc(mapping);
 				if (unlikely(!*cached_page)) {
@@ -524,15 +431,44 @@ static inline int __ntfs_grab_cache_pages(struct address_space *mapping,
 					goto err_out;
 				}
 			}
-			err = add_to_page_cache_lru(*cached_page, mapping,
-					index, GFP_KERNEL);
+			err = add_to_page_cache(*cached_page, mapping, index,
+					GFP_KERNEL);
 			if (unlikely(err)) {
 				if (err == -EEXIST)
 					continue;
 				goto err_out;
 			}
 			pages[nr] = *cached_page;
+			*/
+			pages[nr] = page_cache_alloc(mapping);
+			ntfs_debug("after page_cache_alloc pages[0] = [%d] ",atomic_read(&(pages[0]->_count)) );
+			if (unlikely(!pages[nr])) 
+			{
+				err = -ENOMEM;
+				goto err_out;
+			}
+			else
+			{
+				err = add_to_page_cache_lru(pages[nr], mapping, index, GFP_KERNEL);
+				ntfs_debug("after add_to_page_cache pages[0] = [%d] ",atomic_read(&(pages[0]->_count)) );
+				if (unlikely(err)) 
+				{
+					if (err == -EEXIST)
+					{
+						continue;
+					}
+					goto err_out;
+				}
+			}
+
+			/* Gzged shut
+			page_cache_get(*cached_page);
+			if (unlikely(!pagevec_add(lru_pvec, *cached_page)))
+			{
+				__pagevec_lru_add_file(lru_pvec);
+			}
 			*cached_page = NULL;
+			**/
 		}
 		index++;
 		nr++;
@@ -612,6 +548,7 @@ static int ntfs_prepare_pages_for_non_resident_write(struct page **pages,
 	BUG_ON(!nr_pages);
 	BUG_ON(!pages);
 	BUG_ON(!*pages);
+	BUG_ON(!pages[0]->mapping);
 	vi = pages[0]->mapping->host;
 	ni = NTFS_I(vi);
 	vol = ni->vol;
@@ -807,7 +744,7 @@ map_buffer_cached:
 				u8 *kaddr;
 				unsigned pofs;
 					
-				kaddr = kmap_atomic(page);
+				kaddr = kmap_atomic(page, KM_USER0);
 				if (bh_pos < pos) {
 					pofs = bh_pos & ~PAGE_CACHE_MASK;
 					memset(kaddr + pofs, 0, pos - bh_pos);
@@ -816,7 +753,7 @@ map_buffer_cached:
 					pofs = end & ~PAGE_CACHE_MASK;
 					memset(kaddr + pofs, 0, bh_end - end);
 				}
-				kunmap_atomic(kaddr);
+				kunmap_atomic(kaddr, KM_USER0);
 				flush_dcache_page(page);
 			}
 			continue;
@@ -1371,6 +1308,181 @@ rl_not_mapped_enoent:
 	return err;
 }
 
+/*
+ * Copy as much as we can into the pages and return the number of bytes which
+ * were sucessfully copied.  If a fault is encountered then clear the pages
+ * out to (ofs + bytes) and return the number of bytes which were copied.
+ */
+static inline size_t ntfs_copy_from_user(struct page **pages,
+		unsigned nr_pages, unsigned ofs, const char __user *buf,
+		size_t bytes)
+{
+	struct page **last_page = pages + nr_pages;
+	char *addr;
+	size_t total = 0;
+	unsigned len;
+	int left;
+
+	do {
+		len = PAGE_CACHE_SIZE - ofs;
+		if (len > bytes)
+			len = bytes;
+		addr = kmap_atomic(*pages, KM_USER0);
+		left = __copy_from_user_inatomic(addr + ofs, buf, len);
+		kunmap_atomic(addr, KM_USER0);
+		if (unlikely(left)) {
+			/* Do it the slow way. */
+			addr = kmap(*pages);
+			left = __copy_from_user(addr + ofs, buf, len);
+			kunmap(*pages);
+			if (unlikely(left))
+				goto err_out;
+		}
+		total += len;
+		bytes -= len;
+		if (!bytes)
+			break;
+		buf += len;
+		ofs = 0;
+	} while (++pages < last_page);
+out:
+	return total;
+err_out:
+	total += len - left;
+	/* Zero the rest of the target like __copy_from_user(). */
+	while (++pages < last_page) {
+		bytes -= len;
+		if (!bytes)
+			break;
+		len = PAGE_CACHE_SIZE;
+		if (len > bytes)
+			len = bytes;
+		zero_user(*pages, 0, len);
+	}
+	goto out;
+}
+
+static size_t __ntfs_copy_from_user_iovec_inatomic(char *vaddr,
+		const struct iovec *iov, size_t iov_ofs, size_t bytes)
+{
+	size_t total = 0;
+
+	while (1) {
+		const char __user *buf = iov->iov_base + iov_ofs;
+		unsigned len;
+		size_t left;
+
+		len = iov->iov_len - iov_ofs;
+		if (len > bytes)
+			len = bytes;
+		left = __copy_from_user_inatomic(vaddr, buf, len);
+		total += len;
+		bytes -= len;
+		vaddr += len;
+		if (unlikely(left)) {
+			total -= left;
+			break;
+		}
+		if (!bytes)
+			break;
+		iov++;
+		iov_ofs = 0;
+	}
+	return total;
+}
+
+static inline void ntfs_set_next_iovec(const struct iovec **iovp,
+		size_t *iov_ofsp, size_t bytes)
+{
+	const struct iovec *iov = *iovp;
+	size_t iov_ofs = *iov_ofsp;
+
+	while (bytes) {
+		unsigned len;
+
+		len = iov->iov_len - iov_ofs;
+		if (len > bytes)
+			len = bytes;
+		bytes -= len;
+		iov_ofs += len;
+		if (iov->iov_len == iov_ofs) {
+			iov++;
+			iov_ofs = 0;
+		}
+	}
+	*iovp = iov;
+	*iov_ofsp = iov_ofs;
+}
+
+/*
+ * This has the same side-effects and return value as ntfs_copy_from_user().
+ * The difference is that on a fault we need to memset the remainder of the
+ * pages (out to offset + bytes), to emulate ntfs_copy_from_user()'s
+ * single-segment behaviour.
+ *
+ * We call the same helper (__ntfs_copy_from_user_iovec_inatomic()) both
+ * when atomic and when not atomic.  This is ok because
+ * __ntfs_copy_from_user_iovec_inatomic() calls __copy_from_user_inatomic()
+ * and it is ok to call this when non-atomic.
+ * Infact, the only difference between __copy_from_user_inatomic() and
+ * __copy_from_user() is that the latter calls might_sleep() and the former
+ * should not zero the tail of the buffer on error.  And on many
+ * architectures __copy_from_user_inatomic() is just defined to
+ * __copy_from_user() so it makes no difference at all on those architectures.
+ */
+static inline size_t ntfs_copy_from_user_iovec(struct page **pages,
+		unsigned nr_pages, unsigned ofs, const struct iovec **iov,
+		size_t *iov_ofs, size_t bytes)
+{
+	struct page **last_page = pages + nr_pages;
+	char *addr;
+	size_t copied, len, total = 0;
+
+	do {
+		len = PAGE_CACHE_SIZE - ofs;
+		if (len > bytes)
+			len = bytes;
+		addr = kmap_atomic(*pages, KM_USER0);
+		copied = __ntfs_copy_from_user_iovec_inatomic(addr + ofs,
+				*iov, *iov_ofs, len);
+		kunmap_atomic(addr, KM_USER0);
+		if (unlikely(copied != len)) {
+			/* Do it the slow way. */
+			addr = kmap(*pages);
+			copied = __ntfs_copy_from_user_iovec_inatomic(addr + ofs,
+					*iov, *iov_ofs, len);
+			/*
+			 * Zero the rest of the target like __copy_from_user().
+			 */
+			memset(addr + ofs + copied, 0, len - copied);
+			kunmap(*pages);
+			if (unlikely(copied != len))
+				goto err_out;
+		}
+		total += len;
+		bytes -= len;
+		if (!bytes)
+			break;
+		ntfs_set_next_iovec(iov, iov_ofs, len);
+		ofs = 0;
+	} while (++pages < last_page);
+out:
+	return total;
+err_out:
+	total += copied;
+	/* Zero the rest of the target like __copy_from_user(). */
+	while (++pages < last_page) {
+		bytes -= len;
+		if (!bytes)
+			break;
+		len = PAGE_CACHE_SIZE;
+		if (len > bytes)
+			len = bytes;
+		zero_user(*pages, 0, len);
+	}
+	goto out;
+}
+
 static inline void ntfs_flush_dcache_pages(struct page **pages,
 		unsigned nr_pages)
 {
@@ -1478,11 +1590,14 @@ static inline int ntfs_commit_pages_after_non_resident_write(
 	}
 	err = ntfs_attr_lookup(ni->type, ni->name, ni->name_len,
 			CASE_SENSITIVE, 0, NULL, 0, ctx);
-	if (unlikely(err)) {
+	if (unlikely(err)) 
+	{
+		ntfs_error(vi->i_sb,"ntfs_attr_lookup error [%d]",err);
 		if (err == -ENOENT)
 			err = -EIO;
 		goto err_out;
 	}
+
 	a = ctx->attr;
 	BUG_ON(!a->non_resident);
 	write_lock_irqsave(&ni->size_lock, flags);
@@ -1572,39 +1687,44 @@ static int ntfs_commit_pages_after_write(struct page **pages,
 	BUG_ON(!page);
 	vi = page->mapping->host;
 	ni = NTFS_I(vi);
-	ntfs_debug("Entering for inode 0x%lx, attribute type 0x%x, start page "
-			"index 0x%lx, nr_pages 0x%x, pos 0x%llx, bytes 0x%zx.",
-			vi->i_ino, ni->type, page->index, nr_pages,
-			(long long)pos, bytes);
 	if (NInoNonResident(ni))
+	{
 		return ntfs_commit_pages_after_non_resident_write(pages,
 				nr_pages, pos, bytes);
+	}
 	BUG_ON(nr_pages > 1);
 	/*
 	 * Attribute is resident, implying it is not compressed, encrypted, or
 	 * sparse.
 	 */
 	if (!NInoAttr(ni))
+	{
 		base_ni = ni;
+	}
 	else
+	{
 		base_ni = ni->ext.base_ntfs_ino;
+	}
 	BUG_ON(NInoNonResident(ni));
 	/* Map, pin, and lock the mft record. */
 	m = map_mft_record(base_ni);
-	if (IS_ERR(m)) {
+	if (IS_ERR(m)) 
+	{
 		err = PTR_ERR(m);
 		m = NULL;
 		ctx = NULL;
 		goto err_out;
 	}
 	ctx = ntfs_attr_get_search_ctx(base_ni, m);
-	if (unlikely(!ctx)) {
+	if (unlikely(!ctx)) 
+	{
 		err = -ENOMEM;
 		goto err_out;
 	}
 	err = ntfs_attr_lookup(ni->type, ni->name, ni->name_len,
 			CASE_SENSITIVE, 0, NULL, 0, ctx);
-	if (unlikely(err)) {
+	if (unlikely(err)) 
+	{
 		if (err == -ENOENT)
 			err = -EIO;
 		goto err_out;
@@ -1620,7 +1740,7 @@ static int ntfs_commit_pages_after_write(struct page **pages,
 	BUG_ON(end > le32_to_cpu(a->length) -
 			le16_to_cpu(a->data.resident.value_offset));
 	kattr = (u8*)a + le16_to_cpu(a->data.resident.value_offset);
-	kaddr = kmap_atomic(page);
+	kaddr = kmap_atomic(page, KM_USER0);
 	/* Copy the received data from the page to the mft record. */
 	memcpy(kattr + pos, kaddr + pos, bytes);
 	/* Update the attribute length if necessary. */
@@ -1642,14 +1762,15 @@ static int ntfs_commit_pages_after_write(struct page **pages,
 		flush_dcache_page(page);
 		SetPageUptodate(page);
 	}
-	kunmap_atomic(kaddr);
+	kunmap_atomic(kaddr, KM_USER0);
 	/* Update initialized_size/i_size if necessary. */
 	read_lock_irqsave(&ni->size_lock, flags);
 	initialized_size = ni->initialized_size;
 	BUG_ON(end > ni->allocated_size);
 	read_unlock_irqrestore(&ni->size_lock, flags);
 	BUG_ON(initialized_size != i_size);
-	if (end > initialized_size) {
+	if (end > initialized_size) 
+	{
 		write_lock_irqsave(&ni->size_lock, flags);
 		ni->initialized_size = end;
 		i_size_write(vi, end);
@@ -1691,85 +1812,80 @@ err_out:
 	return err;
 }
 
-/*
- * Copy as much as we can into the pages and return the number of bytes which
- * were successfully copied.  If a fault is encountered then clear the pages
- * out to (ofs + bytes) and return the number of bytes which were copied.
- */
-static size_t ntfs_copy_from_user_iter(struct page **pages, unsigned nr_pages,
-		unsigned ofs, struct iov_iter *i, size_t bytes)
-{
-	struct page **last_page = pages + nr_pages;
-	size_t total = 0;
-	struct iov_iter data = *i;
-	unsigned len, copied;
-
-	do {
-		len = PAGE_CACHE_SIZE - ofs;
-		if (len > bytes)
-			len = bytes;
-		copied = iov_iter_copy_from_user_atomic(*pages, &data, ofs,
-				len);
-		total += copied;
-		bytes -= copied;
-		if (!bytes)
-			break;
-		iov_iter_advance(&data, copied);
-		if (copied < len)
-			goto err;
-		ofs = 0;
-	} while (++pages < last_page);
-out:
-	return total;
-err:
-	/* Zero the rest of the target like __copy_from_user(). */
-	len = PAGE_CACHE_SIZE - copied;
-	do {
-		if (len > bytes)
-			len = bytes;
-		zero_user(*pages, copied, len);
-		bytes -= len;
-		copied = 0;
-		len = PAGE_CACHE_SIZE;
-	} while (++pages < last_page);
-	goto out;
-}
-
 /**
- * ntfs_perform_write - perform buffered write to a file
- * @file:	file to write to
- * @i:		iov_iter with data to write
- * @pos:	byte offset in file at which to begin writing to
+ * ntfs_file_buffered_write -
+ *
+ * Locking: The vfs is holding ->i_mutex on the inode.
  */
-static ssize_t ntfs_perform_write(struct file *file, struct iov_iter *i,
-		loff_t pos)
+static ssize_t ntfs_file_buffered_write(struct kiocb *iocb,
+		const struct iovec *iov, unsigned long nr_segs,
+		loff_t pos, loff_t *ppos, size_t count)
 {
+	struct file *file = iocb->ki_filp;
 	struct address_space *mapping = file->f_mapping;
 	struct inode *vi = mapping->host;
 	ntfs_inode *ni = NTFS_I(vi);
 	ntfs_volume *vol = ni->vol;
 	struct page *pages[NTFS_MAX_PAGES_PER_CLUSTER];
 	struct page *cached_page = NULL;
+	char __user *buf = NULL;
+	s64 end, ll;
 	VCN last_vcn;
 	LCN lcn;
-	size_t bytes;
-	ssize_t status, written = 0;
+	unsigned long flags;
+	size_t bytes, iov_ofs = 0;	/* Offset in the current iovec. */
+	ssize_t status, written;
 	unsigned nr_pages;
+	int err;
+	struct pagevec lru_pvec;
 
-	ntfs_debug("Entering for i_ino 0x%lx, attribute type 0x%x, pos "
-			"0x%llx, count 0x%lx.", vi->i_ino,
-			(unsigned)le32_to_cpu(ni->type),
-			(unsigned long long)pos,
-			(unsigned long)iov_iter_count(i));
+	ntfs_debug("Entering for i_ino 0x%lx, attribute type 0x%x, "
+			"pos 0x%llx, count 0x%lx.",
+			vi->i_ino, (unsigned)le32_to_cpu(ni->type),
+			(unsigned long long)pos, (unsigned long)count);
+	if (unlikely(!count))
+		return 0;
+	BUG_ON(NInoMstProtected(ni));
+	/*
+	 * If the attribute is not an index root and it is encrypted or
+	 * compressed, we cannot write to it yet.  Note we need to check for
+	 * AT_INDEX_ALLOCATION since this is the type of both directory and
+	 * index inodes.
+	 */
+	if (ni->type != AT_INDEX_ALLOCATION) {
+		/* If file is encrypted, deny access, just like NT4. */
+		if (NInoEncrypted(ni)) {
+			/*
+			 * Reminder for later: Encrypted files are _always_
+			 * non-resident so that the content can always be
+			 * encrypted.
+			 */
+			ntfs_debug("Denying write access to encrypted file.");
+			return -EACCES;
+		}
+		if (NInoCompressed(ni)) {
+			/* Only unnamed $DATA attribute can be compressed. */
+			BUG_ON(ni->type != AT_DATA);
+			BUG_ON(ni->name_len);
+			/*
+			 * Reminder for later: If resident, the data is not
+			 * actually compressed.  Only on the switch to non-
+			 * resident does compression kick in.  This is in
+			 * contrast to encrypted files (see above).
+			 */
+			ntfs_error(vi->i_sb, "Writing to compressed files is "
+					"not implemented yet.  Sorry.");
+			return -EOPNOTSUPP;
+		}
+	}
 	/*
 	 * If a previous ntfs_truncate() failed, repeat it and abort if it
 	 * fails again.
 	 */
 	if (unlikely(NInoTruncateFailed(ni))) {
-		int err;
-
-		inode_dio_wait(vi);
+		down_write(&vi->i_alloc_sem);
 		err = ntfs_truncate(vi);
+		up_write(&vi->i_alloc_sem);
 		if (err || NInoTruncateFailed(ni)) {
 			if (!err)
 				err = -EIO;
@@ -1781,6 +1897,83 @@ static ssize_t ntfs_perform_write(struct file *file, struct iov_iter *i,
 			return err;
 		}
 	}
+	/* The first byte after the write. */
+	end = pos + count;
+	/*
+	 * If the write goes beyond the allocated size, extend the allocation
+	 * to cover the whole of the write, rounded up to the nearest cluster.
+	 */
+	read_lock_irqsave(&ni->size_lock, flags);
+	ll = ni->allocated_size;
+	read_unlock_irqrestore(&ni->size_lock, flags);
+	if (end > ll) 
+	{
+		/* Extend the allocation without changing the data size. */
+		ll = ntfs_attr_extend_allocation(ni, end, -1, pos);
+		if (likely(ll >= 0)) {
+			BUG_ON(pos >= ll);
+			/* If the extension was partial truncate the write. */
+			if (end > ll) {
+				ntfs_debug("Truncating write to inode 0x%lx, "
+						"attribute type 0x%x, because "
+						"the allocation was only "
+						"partially extended.",
+						vi->i_ino, (unsigned)
+						le32_to_cpu(ni->type));
+				end = ll;
+				count = ll - pos;
+			}
+		} else {
+			err = ll;
+			read_lock_irqsave(&ni->size_lock, flags);
+			ll = ni->allocated_size;
+			read_unlock_irqrestore(&ni->size_lock, flags);
+			/* Perform a partial write if possible or fail. */
+			if (pos < ll) {
+				ntfs_debug("Truncating write to inode 0x%lx, "
+						"attribute type 0x%x, because "
+						"extending the allocation "
+						"failed (error code %i).",
+						vi->i_ino, (unsigned)
+						le32_to_cpu(ni->type), err);
+				end = ll;
+				count = ll - pos;
+			} else {
+				ntfs_error(vol->sb, "Cannot perform write to "
+						"inode 0x%lx, attribute type "
+						"0x%x, because extending the "
+						"allocation failed (error "
+						"code %i).", vi->i_ino,
+						(unsigned)
+						le32_to_cpu(ni->type), err);
+				return err;
+			}
+		}
+	}
+	pagevec_init(&lru_pvec, 0);
+	written = 0;
+	/*
+	 * If the write starts beyond the initialized size, extend it up to the
+	 * beginning of the write and initialize all non-sparse space between
+	 * the old initialized size and the new one.  This automatically also
+	 * increments the vfs inode->i_size to keep it above or equal to the
+	 * initialized_size.
+	 */
+	read_lock_irqsave(&ni->size_lock, flags);
+	ll = ni->initialized_size;
+	read_unlock_irqrestore(&ni->size_lock, flags);
+	if (pos > ll) {
+		err = ntfs_attr_extend_initialized(ni, pos, &cached_page, &lru_pvec);
+		if (err < 0) {
+			ntfs_error(vol->sb, "Cannot perform write to inode "
+					"0x%lx, attribute type 0x%x, because "
+					"extending the initialized size "
+					"failed (error code %i).", vi->i_ino,
+					(unsigned)le32_to_cpu(ni->type), err);
+			status = err;
+			goto err_out;
+		}
+	}
 	/*
 	 * Determine the number of pages per cluster for non-resident
 	 * attributes.
@@ -1788,12 +1981,16 @@ static ssize_t ntfs_perform_write(struct file *file, struct iov_iter *i,
 	nr_pages = 1;
 	if (vol->cluster_size > PAGE_CACHE_SIZE && NInoNonResident(ni))
 		nr_pages = vol->cluster_size >> PAGE_CACHE_SHIFT;
+	/* Finally, perform the actual write. */
 	last_vcn = -1;
+	if (likely(nr_segs == 1))
+		buf = iov->iov_base;
 	do {
 		VCN vcn;
 		pgoff_t idx, start_idx;
 		unsigned ofs, do_pages, u;
 		size_t copied;
+		ntfs_debug("new loop pos=[%lld]",pos);
 
 		start_idx = idx = pos >> PAGE_CACHE_SHIFT;
 		ofs = pos & ~PAGE_CACHE_MASK;
@@ -1813,10 +2010,10 @@ static ssize_t ntfs_perform_write(struct file *file, struct iov_iter *i,
 						vol->cluster_size_bits, false);
 				up_read(&ni->runlist.lock);
 				if (unlikely(lcn < LCN_HOLE)) {
+					status = -EIO;
 					if (lcn == LCN_ENOMEM)
 						status = -ENOMEM;
-					else {
-						status = -EIO;
+					else
 						ntfs_error(vol->sb, "Cannot "
 							"perform write to "
 							"inode 0x%lx, "
@@ -1825,7 +2022,6 @@ static ssize_t ntfs_perform_write(struct file *file, struct iov_iter *i,
 							"is corrupt.",
 							vi->i_ino, (unsigned)
 							le32_to_cpu(ni->type));
-					}
 					break;
 				}
 				if (lcn == LCN_HOLE) {
@@ -1838,9 +2034,8 @@ static ssize_t ntfs_perform_write(struct file *file, struct iov_iter *i,
 				}
 			}
 		}
-		if (bytes > iov_iter_count(i))
-			bytes = iov_iter_count(i);
-again:
+		if (bytes > count)
+			bytes = count;
 		/*
 		 * Bring in the user page(s) that we will copy from _first_.
 		 * Otherwise there is a nasty deadlock on copying from the same
@@ -1849,13 +2044,12 @@ again:
 		 * pages being swapped out between us bringing them into memory
 		 * and doing the actual copying.
 		 */
-		if (unlikely(iov_iter_fault_in_multipages_readable(i, bytes))) {
-			status = -EFAULT;
-			break;
-		}
+		if (likely(nr_segs == 1))
+			ntfs_fault_in_pages_readable(buf, bytes);
+		else
+			ntfs_fault_in_pages_readable_iovec(iov, iov_ofs, bytes);
 		/* Get and lock @do_pages starting at index @start_idx. */
-		status = __ntfs_grab_cache_pages(mapping, start_idx, do_pages,
-				pages, &cached_page);
+		status = __ntfs_grab_cache_pages(mapping, start_idx, do_pages, pages/*, &cached_page, &lru_pvec*/);
 		if (unlikely(status))
 			break;
 		/*
@@ -1864,63 +2058,80 @@ again:
 		 * need to bring uptodate any buffers that are only partially
 		 * being written to.
 		 */
-		if (NInoNonResident(ni)) {
-			status = ntfs_prepare_pages_for_non_resident_write(
-					pages, do_pages, pos, bytes);
-			if (unlikely(status)) {
+		if (NInoNonResident(ni)) 
+		{
+			status = ntfs_prepare_pages_for_non_resident_write( pages, do_pages, pos, bytes);
+			if (unlikely(status)) 
+			{
+				loff_t i_size;
+
 				do {
 					unlock_page(pages[--do_pages]);
 					page_cache_release(pages[do_pages]);
 				} while (do_pages);
+				/*
+				 * The write preparation may have instantiated
+				 * allocated space outside i_size.  Trim this
+				 * off again.  We can ignore any errors in this
+				 * case as we will just be waisting a bit of
+				 * allocated space, which is not a disaster.
+				 */
+				i_size = i_size_read(vi);
+				if (pos + bytes > i_size)
+					vmtruncate(vi, i_size);
 				break;
 			}
 		}
+		ntfs_debug("pages[0] = [%d] ",atomic_read(&(pages[0]->_count)) );
 		u = (pos >> PAGE_CACHE_SHIFT) - pages[0]->index;
-		copied = ntfs_copy_from_user_iter(pages + u, do_pages - u, ofs,
-					i, bytes);
-		ntfs_flush_dcache_pages(pages + u, do_pages - u);
-		status = 0;
-		if (likely(copied == bytes)) {
-			status = ntfs_commit_pages_after_write(pages, do_pages,
-					pos, bytes);
-			if (!status)
-				status = bytes;
+		if (likely(nr_segs == 1)) 
+		{
+			copied = ntfs_copy_from_user(pages + u, do_pages - u,
+					ofs, buf, bytes);
+			buf += copied;
+		} 
+		else
+		{
+			copied = ntfs_copy_from_user_iovec(pages + u,
+					do_pages - u, ofs, &iov, &iov_ofs,
+					bytes);
 		}
+		ntfs_flush_dcache_pages(pages + u, do_pages - u);
+		status = ntfs_commit_pages_after_write(pages, do_pages, pos, bytes);
+		if (likely(!status)) {
+			written += copied;
+			count -= copied;
+			pos += copied;
+			if (unlikely(copied != bytes))
+				status = -EFAULT;
+		}
+
 		do {
 			unlock_page(pages[--do_pages]);
+			mark_page_accessed(pages[do_pages]);
 			page_cache_release(pages[do_pages]);
 		} while (do_pages);
-		if (unlikely(status < 0))
-			break;
-		copied = status;
-		cond_resched();
-		if (unlikely(!copied)) {
-			size_t sc;
 
-			/*
-			 * We failed to copy anything.  Fall back to single
-			 * segment length write.
-			 *
-			 * This is needed to avoid possible livelock in the
-			 * case that all segments in the iov cannot be copied
-			 * at once without a pagefault.
-			 */
-			sc = iov_iter_single_seg_count(i);
-			if (bytes > sc)
-				bytes = sc;
-			goto again;
-		}
-		iov_iter_advance(i, copied);
-		pos += copied;
-		written += copied;
-		balance_dirty_pages_ratelimited(mapping);
-		if (fatal_signal_pending(current)) {
-			status = -EINTR;
+		if (unlikely(status))
 			break;
-		}
-	} while (iov_iter_count(i));
+		balance_dirty_pages_ratelimited(mapping);
+		cond_resched();
+		ntfs_debug("Loop done ");
+	} while (count);
+err_out:
+	*ppos = pos;
 	if (cached_page)
 		page_cache_release(cached_page);
+	/* For now, when the user asks for O_SYNC, we actually give O_DSYNC. */
+	if (likely(!status)) {
+		if (unlikely((file->f_flags & O_SYNC) || IS_SYNC(vi))) {
+			if (!mapping->a_ops->writepage || !is_sync_kiocb(iocb))
+				status = generic_osync_inode(vi, mapping,
+						OSYNC_METADATA|OSYNC_DATA);
+		}
+  	}
+	/** Gzged shut down 
+	pagevec_lru_add_file(&lru_pvec);**/
 	ntfs_debug("Done.  Returning %s (written 0x%lx, status %li).",
 			written ? "written" : "status", (unsigned long)written,
 			(long)status);
@@ -1928,41 +2139,137 @@ again:
 }
 
 /**
- * ntfs_file_write_iter - simple wrapper for ntfs_file_write_iter_nolock()
- * @iocb:	IO state structure
- * @from:	iov_iter with data to write
- *
- * Basically the same as generic_file_write_iter() except that it ends up
- * up calling ntfs_perform_write() instead of generic_perform_write() and that
- * O_DIRECT is not implemented.
+ * ntfs_file_aio_write_nolock -
  */
-static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+static ssize_t ntfs_file_aio_write_nolock(struct kiocb *iocb,
+		const struct iovec *iov, unsigned long nr_segs, loff_t *ppos)
 {
 	struct file *file = iocb->ki_filp;
-	struct inode *vi = file_inode(file);
-	ssize_t written = 0;
-	ssize_t err;
+	struct address_space *mapping = file->f_mapping;
+	struct inode *inode = mapping->host;
+	loff_t pos;
+	size_t count;		/* after file limit checks */
+	ssize_t written, err;
 
-	mutex_lock(&vi->i_mutex);
+	count = 0;
+	err = generic_segment_checks(iov, &nr_segs, &count, VERIFY_READ);
+	if (err)
+		return err;
+	pos = *ppos;
+	vfs_check_frozen(inode->i_sb, SB_FREEZE_WRITE);
 	/* We can write back this queue in page reclaim. */
-	current->backing_dev_info = inode_to_bdi(vi);
-	err = ntfs_prepare_file_for_write(iocb, from);
-	if (iov_iter_count(from) && !err)
-		written = ntfs_perform_write(file, from, iocb->ki_pos);
+	current->backing_dev_info = mapping->backing_dev_info;
+	written = 0;
+	err = generic_write_checks(file, &pos, &count, S_ISBLK(inode->i_mode));
+	if (err)
+		goto out;
+	if (!count)
+		goto out;
+	err = file_remove_suid(file);
+	if (err)
+		goto out;
+	file_update_time(file);
+	written = ntfs_file_buffered_write(iocb, iov, nr_segs, pos, ppos,
+			count);
+out:
 	current->backing_dev_info = NULL;
-	mutex_unlock(&vi->i_mutex);
-	if (likely(written > 0)) {
-		err = generic_write_sync(file, iocb->ki_pos, written);
-		if (err < 0)
-			written = 0;
-	}
-	iocb->ki_pos += written;
 	return written ? written : err;
+}
+
+/**
+ * ntfs_file_aio_write -
+ */
+/** Gzged mod
+static ssize_t ntfs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos)
+{
+	struct file *file = iocb->ki_filp;
+	struct address_space *mapping = file->f_mapping;
+	struct inode *inode = mapping->host;
+	ssize_t ret;
+
+	BUG_ON(iocb->ki_pos != pos);
+
+	mutex_lock(&inode->i_mutex);
+	ret = ntfs_file_aio_write_nolock(iocb, iov, nr_segs, &iocb->ki_pos);
+	mutex_unlock(&inode->i_mutex);
+	if (ret > 0 && ((file->f_flags & O_SYNC) || IS_SYNC(inode))) {
+		int err = sync_page_range(inode, mapping, pos, ret);
+		if (err < 0)
+			ret = err;
+	}
+	return ret;
+}
+**/
+static ssize_t ntfs_file_aio_write(struct kiocb *iocb, const char __user *buf,
+					size_t count, loff_t pos)
+{
+	struct file *file = iocb->ki_filp;
+	struct address_space *mapping = file->f_mapping;
+	struct inode *inode = mapping->host;
+	ssize_t ret;
+
+	struct iovec local_iov = { .iov_base = (void __user *)buf,
+						.iov_len = count };
+
+	BUG_ON(iocb->ki_pos != pos);
+
+	mutex_lock(&inode->i_mutex);
+	ret = ntfs_file_aio_write_nolock(iocb, &local_iov, 1, &iocb->ki_pos);
+	mutex_unlock(&inode->i_mutex);
+	if (ret > 0 && ((file->f_flags & O_SYNC) || IS_SYNC(inode))) {
+		int err = sync_page_range(inode, mapping, pos, ret);
+		if (err < 0)
+			ret = err;
+	}
+	return ret;
+}
+
+
+/**
+ * ntfs_file_writev -
+ *
+ * Basically the same as generic_file_writev() except that it ends up calling
+ * ntfs_file_aio_write_nolock() instead of __generic_file_aio_write_nolock().
+ */
+static ssize_t ntfs_file_writev(struct file *file, const struct iovec *iov,
+		unsigned long nr_segs, loff_t *ppos)
+{
+	struct address_space *mapping = file->f_mapping;
+	struct inode *inode = mapping->host;
+	struct kiocb kiocb;
+	ssize_t ret;
+
+	mutex_lock(&inode->i_mutex);
+	init_sync_kiocb(&kiocb, file);
+	ret = ntfs_file_aio_write_nolock(&kiocb, iov, nr_segs, ppos);
+	if (ret == -EIOCBQUEUED)
+		ret = wait_on_sync_kiocb(&kiocb);
+	mutex_unlock(&inode->i_mutex);
+	if (ret > 0 && ((file->f_flags & O_SYNC) || IS_SYNC(inode))) {
+		int err = sync_page_range(inode, mapping, *ppos - ret, ret);
+		if (err < 0)
+			ret = err;
+	}
+	return ret;
+}
+
+/**
+ * ntfs_file_write - simple wrapper for ntfs_file_writev()
+ */
+static ssize_t ntfs_file_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	struct iovec local_iov = { .iov_base = (void __user *)buf,
+				   .iov_len = count };
+
+	return ntfs_file_writev(file, &local_iov, 1, ppos);
 }
 
 /**
  * ntfs_file_fsync - sync a file to disk
  * @filp:	file to be synced
+ * @dentry:	dentry describing the file to sync
  * @datasync:	if non-zero only flush user data and not metadata
  *
  * Data integrity sync of a file to disk.  Used for fsync, fdatasync, and msync
@@ -1978,28 +2285,25 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
  * Also, if @datasync is true, we do not wait on the inode to be written out
  * but we always wait on the page cache pages to be written out.
  *
+ * Note: In the past @filp could be NULL so we ignore it as we don't need it
+ * anyway.
+ *
  * Locking: Caller must hold i_mutex on the inode.
  *
  * TODO: We should probably also write all attribute/index inodes associated
  * with this inode but since we have no simple way of getting to them we ignore
  * this problem for now.
  */
-static int ntfs_file_fsync(struct file *filp, loff_t start, loff_t end,
-			   int datasync)
+static int ntfs_file_fsync(struct file *filp, struct dentry *dentry,
+		int datasync)
 {
-	struct inode *vi = filp->f_mapping->host;
+	struct inode *vi = dentry->d_inode;
 	int err, ret = 0;
 
 	ntfs_debug("Entering for inode 0x%lx.", vi->i_ino);
-
-	err = filemap_write_and_wait_range(vi->i_mapping, start, end);
-	if (err)
-		return err;
-	mutex_lock(&vi->i_mutex);
-
 	BUG_ON(S_ISDIR(vi->i_mode));
 	if (!datasync || !NInoNonResident(NTFS_I(vi)))
-		ret = __ntfs_write_inode(vi, 1);
+		ret = ntfs_write_inode(vi, 1);
 	write_inode_now(vi, !datasync);
 	/*
 	 * NOTE: If we were to use mapping->private_list (see ext2 and
@@ -2014,26 +2318,55 @@ static int ntfs_file_fsync(struct file *filp, loff_t start, loff_t end,
 	else
 		ntfs_warning(vi->i_sb, "Failed to f%ssync inode 0x%lx.  Error "
 				"%u.", datasync ? "data" : "", vi->i_ino, -ret);
-	mutex_unlock(&vi->i_mutex);
 	return ret;
 }
 
 #endif /* NTFS_RW */
 
 const struct file_operations ntfs_file_ops = {
-	.llseek		= generic_file_llseek,
-	.read_iter	= generic_file_read_iter,
+	.llseek		= generic_file_llseek,	 /* Seek inside file. */
+	.read		= do_sync_read,		 /* Read from file. */
+	.aio_read	= generic_file_aio_read, /* Async read from file. */
 #ifdef NTFS_RW
-	.write_iter	= ntfs_file_write_iter,
-	.fsync		= ntfs_file_fsync,
+	.write		= ntfs_file_write,	 /* Write to file. */
+	.aio_write	= ntfs_file_aio_write,	 /* Async write to file. */
+	/*.release	= ,*/			 /* Last file is closed.  See
+						    fs/ext2/file.c::
+						    ext2_release_file() for
+						    how to use this to discard
+						    preallocated space for
+						    write opened files. */
+	.fsync		= ntfs_file_fsync,	 /* Sync a file to disk. */
+	/*.aio_fsync	= ,*/			 /* Sync all outstanding async
+						    i/o operations on a
+						    kiocb. */
 #endif /* NTFS_RW */
-	.mmap		= generic_file_mmap,
-	.open		= ntfs_file_open,
-	.splice_read	= generic_file_splice_read,
+	/*.ioctl	= ,*/			 /* Perform function on the
+						    mounted filesystem. */
+	.mmap		= generic_file_mmap,	 /* Mmap file. */
+	.open		= ntfs_file_open,	 /* Open file. */
+	/** Gzged del from 30 
+	.splice_read	= generic_file_splice_read*/ /* Zero-copy data send with
+						    the data source being on
+						    the ntfs partition.  We do
+						    not need to care about the
+							data destination. */
+	/** Gzged add like 14 **/
+	.sendfile   = generic_file_sendfile,  /* Zero-copy data send with
+											 the data source being on
+											 the ntfs partition.  We
+											 do not need to care about
+											 the data destination. */
+	/*.sendpage	= ,*/			 /* Zero-copy data send with
+						    the data destination being
+						    on the ntfs partition.  We
+						    do not need to care about
+						    the data source. */
 };
 
 const struct inode_operations ntfs_file_inode_ops = {
 #ifdef NTFS_RW
+	.truncate	= ntfs_truncate_vfs,
 	.setattr	= ntfs_setattr,
 #endif /* NTFS_RW */
 };

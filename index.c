@@ -19,8 +19,6 @@
  * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <linux/slab.h>
-
 #include "aops.h"
 #include "collate.h"
 #include "debug.h"
@@ -135,12 +133,19 @@ int ntfs_index_lookup(const void *key, const int key_len,
 	int rc, err = 0;
 
 	ntfs_debug("Entering.");
+	ntfs_debug("check NInoAttr(idx_ni).");
 	BUG_ON(!NInoAttr(idx_ni));
+	ntfs_debug("idx_ni->type check");
 	BUG_ON(idx_ni->type != AT_INDEX_ALLOCATION);
+	ntfs_debug("idx_ni->nr_extents");
 	BUG_ON(idx_ni->nr_extents != -1);
+	ntfs_debug("base_ni");
 	BUG_ON(!base_ni);
+	ntfs_debug("key");
 	BUG_ON(!key);
+	ntfs_debug("key_len[%d]",key_len);
 	BUG_ON(key_len <= 0);
+
 	if (!ntfs_is_collation_rule_supported(
 			idx_ni->itype.index.collation_rule)) {
 		ntfs_error(sb, "Index uses unsupported collation rule 0x%x.  "
