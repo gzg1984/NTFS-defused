@@ -233,7 +233,7 @@ do_non_resident_extend:
 			goto init_err_out;
 		}
 		if (unlikely(PageError(page))) {
-			page_cache_release(page);
+			put_page(page);
 			err = -EIO;
 			goto init_err_out;
 		}
@@ -248,7 +248,7 @@ do_non_resident_extend:
 		write_unlock_irqrestore(&ni->size_lock, flags);
 		/* Set the page dirty so it gets written out. */
 		set_page_dirty(page);
-		page_cache_release(page);
+		put_page(page);
 		/*
 		 * Play nice with the vm and the rest of the system.  This is
 		 * very much needed as we can potentially be modifying the
@@ -542,7 +542,7 @@ out:
 err_out:
 	while (nr > 0) {
 		unlock_page(pages[--nr]);
-		page_cache_release(pages[nr]);
+		put_page(pages[nr]);
 	}
 	goto out;
 }
@@ -1870,7 +1870,7 @@ again:
 			if (unlikely(status)) {
 				do {
 					unlock_page(pages[--do_pages]);
-					page_cache_release(pages[do_pages]);
+					put_page(pages[do_pages]);
 				} while (do_pages);
 				break;
 			}
@@ -1888,7 +1888,7 @@ again:
 		}
 		do {
 			unlock_page(pages[--do_pages]);
-			page_cache_release(pages[do_pages]);
+			put_page(pages[do_pages]);
 		} while (do_pages);
 		if (unlikely(status < 0))
 			break;
@@ -1920,7 +1920,7 @@ again:
 		}
 	} while (iov_iter_count(i));
 	if (cached_page)
-		page_cache_release(cached_page);
+		put_page(cached_page);
 	ntfs_debug("Done.  Returning %s (written 0x%lx, status %li).",
 			written ? "written" : "status", (unsigned long)written,
 			(long)status);

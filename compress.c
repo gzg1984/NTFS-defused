@@ -241,7 +241,7 @@ return_error:
 				if (di == xpage)
 					*xpage_done = 1;
 				else
-					page_cache_release(dp);
+					put_page(dp);
 				dest_pages[di] = NULL;
 			}
 		}
@@ -591,7 +591,7 @@ int ntfs_read_compressed_block(struct page *page)
 				continue;
 			}
 			unlock_page(page);
-			page_cache_release(page);
+			put_page(page);
 			pages[i] = NULL;
 		}
 	}
@@ -771,7 +771,7 @@ lock_retry_remap:
 				if (cur_page == xpage)
 					xpage_done = 1;
 				else
-					page_cache_release(page);
+					put_page(page);
 				pages[cur_page] = NULL;
 			}
 			cb_pos += PAGE_SIZE - cur_ofs;
@@ -850,7 +850,7 @@ lock_retry_remap:
 				if (cur2_page == xpage)
 					xpage_done = 1;
 				else
-					page_cache_release(page);
+					put_page(page);
 				pages[cur2_page] = NULL;
 			}
 			cb_pos2 += PAGE_SIZE - cur_ofs2;
@@ -884,7 +884,7 @@ lock_retry_remap:
 					kunmap(page);
 					unlock_page(page);
 					if (prev_cur_page != xpage)
-						page_cache_release(page);
+						put_page(page);
 					pages[prev_cur_page] = NULL;
 				}
 			}
@@ -914,7 +914,7 @@ lock_retry_remap:
 			kunmap(page);
 			unlock_page(page);
 			if (cur_page != xpage)
-				page_cache_release(page);
+				put_page(page);
 			pages[cur_page] = NULL;
 		}
 	}
@@ -961,7 +961,7 @@ err_out:
 			kunmap(page);
 			unlock_page(page);
 			if (i != xpage)
-				page_cache_release(page);
+				put_page(page);
 		}
 	}
 	kfree(pages);
