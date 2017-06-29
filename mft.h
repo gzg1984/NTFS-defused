@@ -118,7 +118,6 @@ extern bool ntfs_may_write_mft_record(ntfs_volume *vol,
 extern ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, const int mode,
 		ntfs_inode *base_ni, MFT_RECORD **mrec);
 extern int ntfs_extent_mft_record_free(ntfs_inode *ni, MFT_RECORD *m);
-extern int ntfs_mft_record_free(ntfs_volume *vol, ntfs_inode *ni,MFT_RECORD* mrec); 
 
 #endif /* NTFS_RW */
 

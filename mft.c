@@ -23,6 +23,7 @@
 #include <linux/buffer_head.h>
 #include <linux/slab.h>
 #include <linux/swap.h>
+#include <linux/bio.h>
 
 #include "attrib.h"
 #include "aops.h"
@@ -61,16 +62,16 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 	 * here if the volume was that big...
 	 */
 	index = (u64)ni->mft_no << vol->mft_record_size_bits >>
-			PAGE_CACHE_SHIFT;
-	ofs = (ni->mft_no << vol->mft_record_size_bits) & ~PAGE_CACHE_MASK;
+			PAGE_SHIFT;
+	ofs = (ni->mft_no << vol->mft_record_size_bits) & ~PAGE_MASK;
 
 	i_size = i_size_read(mft_vi);
 	/* The maximum valid index into the page cache for $MFT's data. */
-	end_index = i_size >> PAGE_CACHE_SHIFT;
+	end_index = i_size >> PAGE_SHIFT;
 
 	/* If the wanted index is out of bounds the mft record doesn't exist. */
 	if (unlikely(index >= end_index)) {
-		if (index > end_index || (i_size & ~PAGE_CACHE_MASK) < ofs +
+		if (index > end_index || (i_size & ~PAGE_MASK) < ofs +
 				vol->mft_record_size) {
 			page = ERR_PTR(-ENOENT);
 			ntfs_error(vol->sb, "Attempt to read mft record 0x%lx, "
@@ -487,7 +488,7 @@ int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 	}
 	/* Get the page containing the mirror copy of the mft record @m. */
 	page = ntfs_map_page(vol->mftmirr_ino->i_mapping, mft_no >>
-			(PAGE_CACHE_SHIFT - vol->mft_record_size_bits));
+			(PAGE_SHIFT - vol->mft_record_size_bits));
 	if (IS_ERR(page)) {
 		ntfs_error(vol->sb, "Failed to map mft mirror page.");
 		err = PTR_ERR(page);
@@ -497,7 +498,7 @@ int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 	BUG_ON(!PageUptodate(page));
 	ClearPageUptodate(page);
 	/* Offset of the mft mirror record inside the page. */
-	page_ofs = (mft_no << vol->mft_record_size_bits) & ~PAGE_CACHE_MASK;
+	page_ofs = (mft_no << vol->mft_record_size_bits) & ~PAGE_MASK;
 	/* The address in the page of the mirror copy of the mft record @m. */
 	kmirr = page_address(page) + page_ofs;
 	/* Copy the mst protected mft record to the mirror. */
@@ -592,7 +593,7 @@ int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 			clear_buffer_dirty(tbh);
 			get_bh(tbh);
 			tbh->b_end_io = end_buffer_write_sync;
-			submit_bh(WRITE, tbh);
+			submit_bh(REQ_OP_WRITE, 0, tbh);
 		}
 		/* Wait on i/o completion of buffers. */
 		for (i_bhs = 0; i_bhs < nr_bhs; i_bhs++) {
@@ -785,7 +786,7 @@ int write_mft_record_nolock(ntfs_inode *ni, MFT_RECORD *m, int sync)
 		clear_buffer_dirty(tbh);
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_write_sync;
-		submit_bh(WRITE, tbh);
+		submit_bh(REQ_OP_WRITE, 0, tbh);
 	}
 	/* Synchronize the mft mirror now if not @sync. */
 	if (!sync && ni->mft_no < vol->mftmirr_size)
@@ -1178,8 +1179,8 @@ static int ntfs_mft_bitmap_find_and_alloc_free_rec_nolock(ntfs_volume *vol,
 	for (; pass <= 2;) {
 		/* Cap size to pass_end. */
 		ofs = data_pos >> 3;
-		page_ofs = ofs & ~PAGE_CACHE_MASK;
-		size = PAGE_CACHE_SIZE - page_ofs;
+		page_ofs = ofs & ~PAGE_MASK;
+		size = PAGE_SIZE - page_ofs;
 		ll = ((pass_end + 7) >> 3) - ofs;
 		if (size > ll)
 			size = ll;
@@ -1190,7 +1191,7 @@ static int ntfs_mft_bitmap_find_and_alloc_free_rec_nolock(ntfs_volume *vol,
 		 */
 		if (size) {
 			page = ntfs_map_page(mftbmp_mapping,
-					ofs >> PAGE_CACHE_SHIFT);
+					ofs >> PAGE_SHIFT);
 			if (IS_ERR(page)) {
 				ntfs_error(vol->sb, "Failed to read mft "
 						"bitmap, aborting.");
@@ -1328,13 +1329,13 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(ntfs_volume *vol)
 	 */
 	ll = lcn >> 3;
 	page = ntfs_map_page(vol->lcnbmp_ino->i_mapping,
-			ll >> PAGE_CACHE_SHIFT);
+			ll >> PAGE_SHIFT);
 	if (IS_ERR(page)) {
 		up_write(&mftbmp_ni->runlist.lock);
 		ntfs_error(vol->sb, "Failed to read from lcn bitmap.");
 		return PTR_ERR(page);
 	}
-	b = (u8*)page_address(page) + (ll & ~PAGE_CACHE_MASK);
+	b = (u8*)page_address(page) + (ll & ~PAGE_MASK);
 	tb = 1 << (lcn & 7ull);
 	down_write(&vol->lcnbmp_lock);
 	if (*b != 0xff && !(*b & tb)) {
@@ -2103,14 +2104,14 @@ static int ntfs_mft_record_format(const ntfs_volume *vol, const s64 mft_no)
 	 * The index into the page cache and the offset within the page cache
 	 * page of the wanted mft record.
 	 */
-	index = mft_no << vol->mft_record_size_bits >> PAGE_CACHE_SHIFT;
-	ofs = (mft_no << vol->mft_record_size_bits) & ~PAGE_CACHE_MASK;
+	index = mft_no << vol->mft_record_size_bits >> PAGE_SHIFT;
+	ofs = (mft_no << vol->mft_record_size_bits) & ~PAGE_MASK;
 	/* The maximum valid index into the page cache for $MFT's data. */
 	i_size = i_size_read(mft_vi);
-	end_index = i_size >> PAGE_CACHE_SHIFT;
+	end_index = i_size >> PAGE_SHIFT;
 	if (unlikely(index >= end_index)) {
 		if (unlikely(index > end_index || ofs + vol->mft_record_size >=
-				(i_size & ~PAGE_CACHE_MASK))) {
+				(i_size & ~PAGE_MASK))) {
 			ntfs_error(vol->sb, "Tried to format non-existing mft "
 					"record 0x%llx.", (long long)mft_no);
 			return -ENOENT;
@@ -2515,8 +2516,8 @@ mft_rec_already_initialized:
 	 * We now have allocated and initialized the mft record.  Calculate the
 	 * index of and the offset within the page cache page the record is in.
 	 */
-	index = bit << vol->mft_record_size_bits >> PAGE_CACHE_SHIFT;
-	ofs = (bit << vol->mft_record_size_bits) & ~PAGE_CACHE_MASK;
+	index = bit << vol->mft_record_size_bits >> PAGE_SHIFT;
+	ofs = (bit << vol->mft_record_size_bits) & ~PAGE_MASK;
 	/* Read, map, and pin the page containing the mft record. */
 	page = ntfs_map_page(vol->mft_ino->i_mapping, index);
 	if (IS_ERR(page)) {
@@ -2692,7 +2693,7 @@ mft_rec_already_initialized:
 
 		/* Set the inode times to the current time. */
 		vi->i_atime = vi->i_mtime = vi->i_ctime =
-			current_fs_time(vi->i_sb);
+			current_time(vi);
 		/*
 		 * Set the file size to 0, the ntfs inode sizes are set to 0 by
 		 * the call to ntfs_init_big_inode() below.
@@ -2911,86 +2912,6 @@ rollback:
 	m->sequence_number = old_seq_no;
 	extent_nis[base_ni->nr_extents++] = ni;
 	mutex_unlock(&base_ni->extent_lock);
-	mark_mft_record_dirty(ni);
-	return err;
-}
-/**
- * ntfs_mft_record_free - free an mft record on an ntfs volume
- * @vol:	volume on which to free the mft record
- * @ni:		open ntfs inode of the mft record to free
- *
- * Free the mft record of the open inode @ni on the mounted ntfs volume @vol.
- * Note that this function calls ntfs_inode_close() internally and hence you
- * cannot use the pointer @ni any more after this function returns success.
- *
- * On success return 0 and on error return -1 with errno set to the error code.
- */
-int ntfs_mft_record_free(ntfs_volume *vol, ntfs_inode *ni,MFT_RECORD* mrec)
-{
-	u64 mft_no;
-	int err;
-	u16 seq_no, old_seq_no;
-
-	ntfs_debug("Entering for inode 0x%llx.\n", (long long) ni->mft_no);
-
-	if (!vol || !vol->mftbmp_ino || !ni) 
-	{
-		return -EINVAL;
-	}
-
-	/* Cache the mft reference for later. */
-	mft_no = ni->mft_no;
-
-	/* Mark the mft record as not in use. */
-	mrec->flags &= ~MFT_RECORD_IN_USE;
-
-	/* Increment the sequence number, skipping zero, if it is not zero. */
-	old_seq_no = mrec->sequence_number;
-
-	seq_no = le16_to_cpu(old_seq_no);
-	if (seq_no == 0xffff)
-		seq_no = 1;
-	else if (seq_no)
-		seq_no++;
-	mrec->sequence_number = cpu_to_le16(seq_no);
-
-	/* Set the inode dirty and write it out. */
-	flush_dcache_mft_record_page(ni);
-	mark_mft_record_dirty(ni);
-
-	/* Clear the bit in the $MFT/$BITMAP corresponding to this record. */
-	ntfs_debug("before down_write...");
-	//down_write(&vol->mftbmp_lock);
-	if ( (err = ntfs_bitmap_clear_bit(vol->mftbmp_ino, mft_no ))) 
-	//up_write(&vol->mftbmp_lock);
-	{
-		// FIXME: If ntfs_bitmap_clear_run() guarantees rollback on
-		//	  error, this could be changed to goto sync_rollback;
-		goto bitmap_rollback;
-	}
-
-	/* Throw away the now freed inode. 
-	if (!ntfs_inode_close(ni)) {
-		vol->free_mft_records++; 
-		return 0;
-	}
-	err = errno;*/
-	flush_dcache_mft_record_page(ni);
-	mark_mft_record_dirty(ni);
-	return 0;
-
-	/* Rollback what we did... */
-bitmap_rollback:
-	down_write(&vol->mftbmp_lock);
-	if (ntfs_bitmap_set_bit(vol->mftbmp_ino, mft_no))
-	up_write(&vol->mftbmp_lock);
-	{
-		ntfs_debug("Eeek! Rollback failed in ntfs_mft_record_free().  "
-				"Leaving inconsistent metadata!\n");
-	}
-	mrec->flags |= MFT_RECORD_IN_USE;
-	mrec->sequence_number = old_seq_no;
-	flush_dcache_mft_record_page(ni);
 	mark_mft_record_dirty(ni);
 	return err;
 }

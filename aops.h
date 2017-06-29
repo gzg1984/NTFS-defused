@@ -39,10 +39,8 @@
  */
 static inline void ntfs_unmap_page(struct page *page)
 {
-	ntfs_debug("Entering .");
 	kunmap(page);
-	page_cache_release(page);
-	ntfs_debug("done .");
+	put_page(page);
 }
 
 /**
@@ -51,7 +49,7 @@ static inline void ntfs_unmap_page(struct page *page)
  * @index:	index into the page cache for @mapping of the page to map
  *
  * Read a page from the page cache of the address space @mapping at position
- * @index, where @index is in units of PAGE_CACHE_SIZE, and not in bytes.
+ * @index, where @index is in units of PAGE_SIZE, and not in bytes.
  *
  * If the page is not in memory it is loaded from disk first using the readpage
  * method defined in the address space operations of @mapping and the page is
