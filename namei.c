@@ -273,7 +273,6 @@ err_out:
    }
 }
 
-/**************************************Gzged porting from ntfs-3g *********/
 
 #include "index.h"
 
@@ -318,7 +317,7 @@ static int ntfs_ir_truncate(ntfs_index_context *icx, int data_size)
 	 *  INDEX_BLOCK, so ENOSPC isn't a real error.
 	 */
 	ret = ntfs_resident_attr_value_resize(icx->actx->mrec, icx->actx->attr, data_size + offsetof(INDEX_ROOT, index) );
-/*Gzged changed 
+	/*Gzged changed 
 	ret = ntfs_attr_truncate(na, data_size + offsetof(INDEX_ROOT, index));
 	*/
 	if (ret == STATUS_OK) 
@@ -429,11 +428,9 @@ static int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie)
 		} 
 		else 
 		{
-/** Gzged add * */
 			ntfs_debug("should run ntfs_ib_split ");
 			ret = -ENOSPC;
 			goto err_out;
-/** Gzged add end * */
 
 			/* Gzged shut
 			if (ntfs_ib_split(icx, icx->ib) == STATUS_ERROR)
@@ -445,19 +442,17 @@ static int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie)
 			**/
 		}
 		
-/** Gzged mod
+		/*FIXME: Gzged mod
 		ntfs_inode_mark_dirty(icx->actx->ntfs_ino);
-***/
-/***TODO  fix these in furture
-*****/
-/* Gzged add  20091014 **/
+		***/
+		/*FIXME: Gzged will fix these in furture */
 		ntfs_debug("Before flush_dcache_mft_record_page ");/*****die here *****/
 		flush_dcache_mft_record_page(icx->actx->ntfs_ino);
 
 		ntfs_debug("Before mark_mft_record_dirty ");
 		mark_mft_record_dirty(icx->actx->ntfs_ino);
 
-		/** Gzged mod ntfs_index_ctx_reinit(icx); ***/
+		/*FIXME: Gzged mod ntfs_index_ctx_reinit(icx); ***/
 		ntfs_index_ctx_put(icx);
 		ntfs_index_ctx_get(idx_ni);
 	}
@@ -580,7 +575,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	SECURITY_DESCRIPTOR_ATTR *sd =NULL;
 	int err;
 
-/********Gzged new ********/
+	/*Author:Gzged */
 	MFT_RECORD* mrec;
 	int new_temp_offset ;
 	char* temp_new_record;
@@ -975,9 +970,8 @@ ntfs_inode *ntfs_create(ntfs_inode *dir_ni, ntfschar *name, u8 name_len,
 	}
 	return __ntfs_create(dir_ni, name, name_len, type);
 }
-/**************************************Gzged porting from ntfs-3g *********/
 
-static int gzged_ntfs_create(struct inode *dir,
+static int ntfs_create(struct inode *dir,
 				struct dentry *dent,
 				umode_t mode, 
 				bool pn )
@@ -1237,7 +1231,6 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 
 			ntfs_debug("Before mark_mft_record_dirty ");
 			mark_mft_record_dirty(icx->actx->ntfs_ino);
-/******* **********/
 		} 
 		else
 		{
@@ -1322,14 +1315,14 @@ int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen)
 			ntfs_debug("ntfs_index_rm faild");
 			goto err_out;
 		}
-/*
+		/*
 		flush_dcache_mft_record_page(icx->actx->ntfs_ino);
 		mark_mft_record_dirty(icx->actx->ntfs_ino);
 		*/
-/***********Gzged change
+		/*FIXME:Gzged change
 		ntfs_inode_mark_dirty(icx->actx->ntfs_ino);
 		ntfs_index_ctx_reinit(icx);
-***************/
+		***************/
         ntfs_index_ctx_put(icx);
 		ntfs_index_ctx_get(ni);
 	}
@@ -1591,7 +1584,7 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 
 	flush_dcache_mft_record_page(ni);
 	mark_mft_record_dirty(ni);
-/*************Gzged add *********/
+	/*FIXME:Gzged add */
 	ntfs_debug("before unmap_mft_record.");
 	unmap_mft_record(ni);
 	ni = NULL;
@@ -1618,7 +1611,7 @@ err_out:
 	}
 }
 
-static int gzged_ntfs_unlink(struct inode *pi,struct dentry *pd)
+static int ntfs_unlink(struct inode *pi,struct dentry *pd)
 {
 	ntfs_inode* ni = NTFS_I(pd->d_inode);
 	int err = -ENOENT;
@@ -1645,8 +1638,8 @@ static int gzged_ntfs_unlink(struct inode *pi,struct dentry *pd)
  */
 const struct inode_operations ntfs_dir_inode_ops = {
 	.lookup	= ntfs_lookup,	/* VFS: Lookup directory. */
-	.create = gzged_ntfs_create,
-	.unlink = gzged_ntfs_unlink,
+	.create = ntfs_create,
+	.unlink = ntfs_unlink,
 };
 
 /**

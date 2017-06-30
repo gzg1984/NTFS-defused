@@ -81,9 +81,11 @@ ntfschar I30[5] = { cpu_to_le16('$'), cpu_to_le16('I'),
 #include "layout.h"
 #include "types.h"
 
+/* Author: Gzged
+ * Caller is in namei.c
+ */
 int ntfs_lookup_inode_by_key (const void *key, const int key_len, ntfs_index_context *ictx)
 {
-/*Gzged mod **/
 	ntfs_inode* dir_ni = ictx->idx_ni ;
 	const ntfschar* uname = ((FILE_NAME_ATTR *)key)->file_name ;
 	const int uname_len = ((FILE_NAME_ATTR *)key)->file_name_length;
@@ -104,9 +106,6 @@ int ntfs_lookup_inode_by_key (const void *key, const int key_len, ntfs_index_con
 	struct address_space *ia_mapping;
 	struct page *page;
 	u8 *kaddr;
-/*******
-	ntfs_name *name = NULL;
-	*/
 
 	ntfs_debug("Entering.");
 	BUG_ON(!S_ISDIR(VFS_I(dir_ni)->i_mode));
@@ -149,7 +148,6 @@ int ntfs_lookup_inode_by_key (const void *key, const int key_len, ntfs_index_con
 	 */
 	for (;; ie = (INDEX_ENTRY*)((u8*)ie + le16_to_cpu(ie->length))) {
 		/* Bounds checks. */
-/***********************Gzged set **********/
 		ictx->is_in_root = true;
 		ictx->ir = ir;
 		ictx->entry = ie;
@@ -192,7 +190,7 @@ found_it:
 			 * As an optimization we just reuse an existing
 			 * allocation of *res.
 			 */
-			/*
+			/*FIXME:Shut for now and maybe work in future. Author:Gzged
 			if (ie->key.file_name.file_name_type == FILE_NAME_DOS) {
 				if (!name) {
 					name = kmalloc(sizeof(ntfs_name),
@@ -212,12 +210,12 @@ found_it:
 				*res = NULL;
 			}
 			*/
-/* Gzged mod
+			/*FIXME: Gzged mod
 			mref = le64_to_cpu(ie->data.dir.indexed_file);
 			ntfs_attr_put_search_ctx(ctx);
 			unmap_mft_record(dir_ni);
 			return mref;
-*/
+			*/
 
 done:
             ictx->data = (u8*)ie +
@@ -321,7 +319,7 @@ done:
 	 * mft reference associated with it.
 	 */
 	if (!(ie->flags & INDEX_ENTRY_NODE)) {
-/*********Gzged shut 
+		/* FIXME:Gzged shut 
 		if (name) {
 			ntfs_attr_put_search_ctx(ctx);
 			unmap_mft_record(dir_ni);
@@ -330,7 +328,7 @@ done:
 		********/
 		ntfs_debug("Entry not found. ictx->is_in_root[%d]",ictx->is_in_root);
 
-/***********************Gzged set 
+		/*FIXME:Gzged set 
 		ictx->is_in_root = true;
 		ictx->ir = ir;
 		ictx->entry = ie;
@@ -338,10 +336,10 @@ done:
 		ictx->actx = ctx;
 		ictx->ia = NULL;
 		ictx->page = NULL;
-**********/
-/******** Gzged mod ; do not release actx ....and so on 
+		*/
+		/*FIXME: Gzged mod ; do not release actx ....and so on 
 		goto err_out;
-		**********/
+		*/
 		return -ENOENT;
 	} /* Child node present, descend into it. */
 	/* Consistency check: Verify that an index allocation exists. */
@@ -450,7 +448,7 @@ fast_descend_into_child_node:
 					dir_ni->mft_no);
 			goto unm_err_out;
 		}
-/****************************Gzged set **********/
+		/*FIXME:Gzged set */
 		ictx->is_in_root = false;
 		ictx->ia = ia;
 		ictx->entry = ie;
@@ -507,12 +505,12 @@ found_it2:
 				*res = NULL;
 			}
 			*/
-/*Gzged shut	
+			/*Gzged shut	
 			mref = le64_to_cpu(ie->data.dir.indexed_file);
 			unlock_page(page);
 			ntfs_unmap_page(page);
- * return mref;
- * */
+			 * return mref;
+			 * */
             goto done;
 		}
 		/*
@@ -669,12 +667,12 @@ err_out:
 		ntfs_attr_put_search_ctx(ctx);
 	if (m)
 		unmap_mft_record(dir_ni);
-/*Gzged shut
+	/*Gzged shut
 	if (name) {
 		kfree(name);
 		*res = NULL;
 	}
-		*/
+	*/
 	ntfs_debug("done.");
 	return ERR_MREF(err);
 dir_err_out:
