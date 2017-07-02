@@ -971,7 +971,7 @@ ntfs_inode *ntfs_create(ntfs_inode *dir_ni, ntfschar *name, u8 name_len,
 	return __ntfs_create(dir_ni, name, name_len, type);
 }
 
-static int ntfs_create(struct inode *dir,
+static int ntfs_create_inode(struct inode *dir,
 				struct dentry *dent,
 				umode_t mode, 
 				bool pn )
@@ -1611,7 +1611,7 @@ err_out:
 	}
 }
 
-static int ntfs_unlink(struct inode *pi,struct dentry *pd)
+static int ntfs_unlink_inode(struct inode *pi,struct dentry *pd)
 {
 	ntfs_inode* ni = NTFS_I(pd->d_inode);
 	int err = -ENOENT;
@@ -1638,8 +1638,8 @@ static int ntfs_unlink(struct inode *pi,struct dentry *pd)
  */
 const struct inode_operations ntfs_dir_inode_ops = {
 	.lookup	= ntfs_lookup,	/* VFS: Lookup directory. */
-	.create = ntfs_create,
-	.unlink = ntfs_unlink,
+	.create = ntfs_create_inode,
+	.unlink = ntfs_unlink_inode,
 };
 
 /**
