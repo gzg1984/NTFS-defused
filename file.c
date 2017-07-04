@@ -25,7 +25,12 @@
 #include <linux/pagemap.h>
 #include <linux/pagevec.h>
 #include <linux/sched.h>
+
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 #include <linux/sched/signal.h>
+#endif
+
 #include <linux/swap.h>
 #include <linux/uio.h>
 #include <linux/writeback.h>
