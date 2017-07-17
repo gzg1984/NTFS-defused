@@ -466,14 +466,6 @@ err_out:
 	ntfs_debug("%s", ret ? "Failed" : "Done");
 	return ret;
 }
-/**
- * ntfs_index_add_filename - add filename to directory index
- * @ni:		ntfs inode describing directory to which index add filename
- * @fn:		FILE_NAME attribute to add
- * @mref:	reference of the inode which @fn describes
- *
- * Return 0 on success or -1 on error with errno set to the error code.
- */
 ntfs_index_context * ntfs_index_ctx_get_I30(ntfs_inode *idx_ni)
 {
     static ntfschar I30[5] = { cpu_to_le16('$'),
@@ -496,6 +488,14 @@ void ntfs_index_ctx_put_I30(ntfs_index_context *ictx)
 	iput(VFS_I(ictx->idx_ni));
 	ntfs_index_ctx_put(ictx);
 }
+/**
+ * ntfs_index_add_filename - add filename to directory index
+ * @ni:		ntfs inode describing directory to which index add filename
+ * @fn:		FILE_NAME attribute to add
+ * @mref:	reference of the inode which @fn describes
+ *
+ * Return 0 on success or -1 on error with errno set to the error code.
+ */
 static int ntfs_index_add_filename(ntfs_inode *dir_ni, FILE_NAME_ATTR *fn, MFT_REF mref)
 {
 	INDEX_ENTRY *ie;
@@ -549,92 +549,40 @@ out:
 	return ret;
 }
 
-
-/**
- * __ntfs_create - create object on ntfs volume
- * @dir_ni:	ntfs inode for directory in which create new object
- * @name:	unicode name of new object
- * @name_len:	length of the name in unicode characters
- * @type:	type of the object to create
- *
- * Internal, use ntfs_create{,_device,_symlink} wrappers instead.
- *
- * @type can be:
- *	S_IFREG		to create regular file
- *
- * Return opened ntfs inode that describes created object on success 
- * or ERR_PTR(errno) on error 
+/* 
+ * STANDARD_INFORMATION start 
+ * Create STANDARD_INFORMATION attribute. Write STANDARD_INFORMATION
+ * version 1.2, windows will upgrade it to version 3 if needed.
  */
-
-static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
-		ntfschar *name, u8 name_len, dev_t type )
+static int ntfs_create_standard_infomation( MFT_RECORD* mrec,
+		char* const new_record,
+		int* pnew_offset )
 {
-	ntfs_inode *ni =NULL;/** this is for new inode **/
-	FILE_NAME_ATTR *fn = NULL;
 	STANDARD_INFORMATION *si = NULL;
-	SECURITY_DESCRIPTOR_ATTR *sd =NULL;
+	ATTR_REC attr_si;
+	int si_len;
+	int attr_si_len;
 	int err;
 
-	/*Author:Gzged */
-	MFT_RECORD* mrec;
-	int new_temp_offset ;
-	char* temp_new_record;
-
-	ntfs_debug("Entering.");
-	
-	/* Sanity checks. */
-	if (!dir_ni || !name || !name_len) 
+	/*** $STANDARD_INFORMATION (0x10)  **/
+	si_len = offsetof(STANDARD_INFORMATION, ver) + sizeof(si->ver.v1.reserved12);
+	si = kcalloc(1,si_len,GFP_KERNEL );
+	if (!si) 
 	{
-		ntfs_error((VFS_I(dir_ni))->i_sb,"Invalid arguments.");
-		return ERR_PTR(-EINVAL);
+		err = -ENOMEM;
+		goto err_out;
 	}
-
-	/* TODO : not support REPARSE_POINT **/
-
-	/** alloc new mft record for new file **/
-	ni = ntfs_mft_record_alloc(dir_ni->vol, type,NULL,&mrec);
-	if (IS_ERR(ni))
-	{
-		ntfs_debug("ntfs_mft_record_alloc error [%ld]",PTR_ERR(ni));
-		return ni;
-	}
-	else
-	{
-		new_temp_offset = mrec->attrs_offset ;
-		/** ntfs_mft_record_alloc{} had map ni to mrec */
-		temp_new_record=(char*)mrec;
-		ntfs_debug("mrec->mft_record_number [%d]",mrec->mft_record_number);
-	}
-
-
-/**************** Begin from here , error must goto err_out *****************/
-	{ /************************ STANDARD_INFORMATION start ******************/
-		/*
-		 * Create STANDARD_INFORMATION attribute. Write STANDARD_INFORMATION
-		 * version 1.2, windows will upgrade it to version 3 if needed.
-		 */
-		ATTR_REC attr_si;
-		int si_len,attr_si_len;
-
-		/*** $STANDARD_INFORMATION (0x10)  **/
-		si_len = offsetof(STANDARD_INFORMATION, ver) + sizeof(si->ver.v1.reserved12);
-		si = kcalloc(1,si_len,GFP_KERNEL );
-		if (!si) 
-		{
-			err = -ENOMEM;
-			goto err_out;
-		}
 #define NTFS_TIME_OFFSET ((s64)(369 * 365 + 89) * 24 * 3600 * 10000000)
-		si->creation_time = NTFS_TIME_OFFSET ;
-		si->last_data_change_time = NTFS_TIME_OFFSET ;
-		si->last_mft_change_time = NTFS_TIME_OFFSET ;
-		si->last_access_time = NTFS_TIME_OFFSET ;
+	si->creation_time = NTFS_TIME_OFFSET ;
+	si->last_data_change_time = NTFS_TIME_OFFSET ;
+	si->last_mft_change_time = NTFS_TIME_OFFSET ;
+	si->last_access_time = NTFS_TIME_OFFSET ;
 
-		/** set attr **/
-		attr_si_len = offsetof(ATTR_REC, data) + sizeof(attr_si.data.resident) ;
-		attr_si= (ATTR_REC )
-		{
-			.type = AT_STANDARD_INFORMATION ,
+	/** set attr **/
+	attr_si_len = offsetof(ATTR_REC, data) + sizeof(attr_si.data.resident) ;
+	attr_si= (ATTR_REC )
+	{
+		.type = AT_STANDARD_INFORMATION ,
 			.length = attr_si_len +  si_len ,
 			.non_resident = 0,
 			.name_length = 0,
@@ -650,62 +598,70 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 					.flags = 0 ,
 				}
 			},
-		};
-		/*
-		attr_si.data.resident.value_length=si_len
-		attr_si.data.resident.flags = 0;
-		*/
+	};
+	/*
+	   attr_si.data.resident.value_length=si_len
+	   attr_si.data.resident.flags = 0;
+	   */
 
-		/* Add STANDARD_INFORMATION to inode. */
-		memcpy(&(temp_new_record[new_temp_offset]),&attr_si, attr_si_len  );
-		new_temp_offset += attr_si_len;
-		memcpy(&(temp_new_record[new_temp_offset]),  si,  si_len);
-		new_temp_offset += si_len;
+	/* Add STANDARD_INFORMATION to inode. */
+	memcpy(&(new_record[*pnew_offset]),&attr_si, attr_si_len  );
+	(*pnew_offset) += attr_si_len;
+	memcpy(&(new_record[*pnew_offset]),  si,  si_len);
+	(*pnew_offset) += si_len;
 
-		ntfs_debug("new_temp_offset [%d]",new_temp_offset);
+	ntfs_debug("new_temp_offset [%d]",*pnew_offset);
 
+	kfree(si);
+	si=NULL;
+	/* End of STANDARD_INFORMATION */
+	return 0;
+err_out:
+	if(si)
+	{
 		kfree(si);
 		si=NULL;
-	} /****************************** end of STANDARD_INFORMATION *************/
-	
-	/*
-	if (ntfs_sd_add_everyone(ni)) {
-		err = errno;
-		goto err_out;
 	}
-	rollback_sd = 1;
-	*/
+	return err;
+}
 
+static int ntfs_add_entry_to_index(
+		ntfs_inode *dir_ni,
+		ntfschar *name,
+		u8 name_len,
+	ntfs_inode *ni,
+	MFT_RECORD* mrec,
+	char* const temp_new_record, int* pnew_temp_offset)
+{
+	FILE_NAME_ATTR *fn = NULL;
+	int err = 0;
+	ATTR_REC attr_fna;
+	int fn_len;
+	int attr_fna_len;
+	/** create FILE_NAME_ATTR **/
+	fn_len = sizeof(FILE_NAME_ATTR) + name_len * sizeof(ntfschar);
+	fn = kcalloc(1,fn_len,GFP_KERNEL);
+	if (!fn) 
+	{
+		err = -ENOMEM;
+		goto err_fail_alloc;
+	}
+	fn->parent_directory = MK_LE_MREF(dir_ni->mft_no, le16_to_cpu(dir_ni->seq_no));
+	fn->file_name_length = name_len;
+	fn->file_name_type = FILE_NAME_POSIX;
+	fn->creation_time = NTFS_TIME_OFFSET;
+	fn->last_data_change_time = NTFS_TIME_OFFSET;
+	fn->last_mft_change_time = NTFS_TIME_OFFSET;
+	fn->last_access_time = NTFS_TIME_OFFSET;
+	fn->data_size = cpu_to_sle64(ni->initialized_size);
+	fn->allocated_size = cpu_to_sle64(ni->allocated_size);
+	memcpy(fn->file_name, name, name_len * sizeof(ntfschar));
 
-
-	{ /****************************** start of FILE_NAME *************/
-
-		ATTR_REC attr_fna;
-		int fn_len , attr_fna_len;
-		/** create FILE_NAME_ATTR **/
-		fn_len = sizeof(FILE_NAME_ATTR) + name_len * sizeof(ntfschar);
-		fn = kcalloc(1,fn_len,GFP_KERNEL);
-		if (!fn) 
-		{
-			err = -ENOMEM;
-			goto err_out;
-		}
-		fn->parent_directory = MK_LE_MREF(dir_ni->mft_no, le16_to_cpu(dir_ni->seq_no));
-		fn->file_name_length = name_len;
-		fn->file_name_type = FILE_NAME_POSIX;
-		fn->creation_time = NTFS_TIME_OFFSET;
-		fn->last_data_change_time = NTFS_TIME_OFFSET;
-		fn->last_mft_change_time = NTFS_TIME_OFFSET;
-		fn->last_access_time = NTFS_TIME_OFFSET;
-		fn->data_size = cpu_to_sle64(ni->initialized_size);
-		fn->allocated_size = cpu_to_sle64(ni->allocated_size);
-		memcpy(fn->file_name, name, name_len * sizeof(ntfschar));
-
-		/* Create FILE_NAME attribute. */
-		attr_fna_len = offsetof(ATTR_REC, data) + sizeof(attr_fna.data.resident) ;
-		attr_fna=(ATTR_REC) 
-		{
-			.type = AT_FILE_NAME ,
+	/* Create FILE_NAME attribute. */
+	attr_fna_len = offsetof(ATTR_REC, data) + sizeof(attr_fna.data.resident) ;
+	attr_fna=(ATTR_REC) 
+	{
+		.type = AT_FILE_NAME ,
 			.length = ( attr_fna_len + fn_len + 7 ) & ~7 ,
 			.non_resident = 0,
 			.name_length = 0,
@@ -721,29 +677,110 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 					.flags = 0 ,
 				}
 			},
-		};
+	};
 
-		/** insert FILE_NAME into new_file_record **/
-		memcpy(&(temp_new_record[new_temp_offset]) , &attr_fna,  attr_fna_len);
-		memcpy(&(temp_new_record[new_temp_offset + attr_fna_len]),fn,fn_len);
-		new_temp_offset += attr_fna.length;
+	/** insert FILE_NAME into new_file_record **/
+	memcpy(&(temp_new_record[*pnew_temp_offset]) , &attr_fna,  attr_fna_len);
+	memcpy(&(temp_new_record[*pnew_temp_offset + attr_fna_len]),fn,fn_len);
+	*pnew_temp_offset += attr_fna.length;
 
-		ntfs_debug("new_temp_offset [%d]",new_temp_offset);
+	ntfs_debug("new_temp_offset [%d]",*pnew_temp_offset);
 
-/**********add to index ********************************************/
-		/* Add FILE_NAME attribute to index. */
-		if ((err = ntfs_index_add_filename(dir_ni, fn, MK_MREF(ni->mft_no, le16_to_cpu(ni->seq_no))) )) 
-		{
-			ntfs_error((VFS_I(dir_ni))->i_sb,"Failed to add entry to the index");
-			goto err_out;
-		}
-/*********************************************************/
-
+	/* Add FILE_NAME attribute to index. */
+	if ((err = ntfs_index_add_filename(dir_ni, fn, MK_MREF(ni->mft_no, le16_to_cpu(ni->seq_no))) )) 
+	{
+		ntfs_error((VFS_I(dir_ni))->i_sb,"Failed to add entry to the index");
+		goto err_out;
+	}
+err_out:
+	if(fn)
+	{
 		kfree(fn);
 		fn=NULL;
-	} /****************************** end of FILE_NAME *************/
+	}
+err_fail_alloc:
+	return err;
+}
+/**
+ * __ntfs_create - create object on ntfs volume
+ * @dir_ni:	ntfs inode for directory in which create new object
+ * @name:	unicode name of new object
+ * @name_len:	length of the name in unicode characters
+ * @type:	type of the object to create
+ *
+ * Internal, use ntfs_create{,_device,_symlink} wrappers instead.
+ *
+ * @type can be:
+ *	S_IFREG		to create regular file
+ *
+ * Return opened ntfs inode that describes created object on success 
+ * or ERR_PTR(errno) on error 
+ */
+static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
+		ntfschar *name, u8 name_len, dev_t type )
+{
+	ntfs_inode *new_ntfs_inode =NULL;/** this is for new inode **/
+	SECURITY_DESCRIPTOR_ATTR *sd =NULL;
+	int err;
 
-	{ /****************************** start of SECURITY_DESCRIPTOR *************/
+	MFT_RECORD* new_mft_record;
+	int new_temp_offset ;
+	char* temp_new_record;/* Wrapper of new_mft_record **/
+
+	ntfs_debug("Entering.");
+
+	/* Sanity checks. */
+	if (!dir_ni || !name || !name_len) 
+	{
+		ntfs_error((VFS_I(dir_ni))->i_sb,"Invalid arguments.");
+		return ERR_PTR(-EINVAL);
+	}
+
+	/* TODO : not support REPARSE_POINT **/
+
+	/** alloc new mft record for new file **/
+	new_ntfs_inode = ntfs_mft_record_alloc(dir_ni->vol, type,NULL,&new_mft_record);
+	if (IS_ERR(new_ntfs_inode))
+	{
+		ntfs_debug("ntfs_mft_record_alloc error [%ld]",PTR_ERR(new_ntfs_inode));
+		return new_ntfs_inode;
+	}
+	else
+	{
+		new_temp_offset = new_mft_record->attrs_offset ;
+		/** ntfs_mft_record_alloc{} had map new_ntfs_inode to new_mft_record */
+		temp_new_record=(char*)new_mft_record;
+		ntfs_debug("new_mft_record->mft_record_number [%d]",new_mft_record->mft_record_number);
+	}
+
+
+	/* Begin from here , error must goto err_out */
+	err = ntfs_create_standard_infomation(new_mft_record,temp_new_record,&new_temp_offset);
+	if(err)
+	{
+		goto err_out;
+	}
+
+	/*
+	   if (ntfs_sd_add_everyone(new_ntfs_inode)) {
+	   err = errno;
+	   goto err_out;
+	   }
+	   rollback_sd = 1;
+	   */
+
+	/*Insert Name to Entry index */
+	err = ntfs_add_entry_to_index(dir_ni,name,name_len,
+			new_ntfs_inode,
+			new_mft_record,temp_new_record,&new_temp_offset);
+	if(err)
+	{
+		goto err_out;
+	}
+
+
+
+	{ /* Start of SECURITY_DESCRIPTOR */
 		ACL *acl;
 		ACCESS_ALLOWED_ACE *ace;
 		SID *sid;
@@ -810,7 +847,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 			.name_length = 0,
 			.name_offset = 0,
 			.flags =  0 ,
-			.instance = (mrec->next_attr_instance) ++ ,
+			.instance = (new_mft_record->next_attr_instance) ++ ,
 			.data=
 			{
 				.resident=
@@ -827,13 +864,13 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 		memcpy(&(temp_new_record[new_temp_offset + attr_sd_len]), sd ,sd_len);
 		new_temp_offset += attr_sd.length;
 		ntfs_debug("new_temp_offset [%d]",new_temp_offset);
-/************************/
+		/************************/
 
 		kfree(sd);
 		sd=NULL;
-	} /****************************** end of SECURITY_DESCRIPTOR *************/
+	} /* End of SECURITY_DESCRIPTOR *************/
 
-	{ /****************************** start of DATA *************/
+	{ /* start of DATA */
 		/***  $DATA (0x80)   **/
 		ATTR_REC attr_data;
 		int attr_data_len= offsetof(ATTR_REC, data) + sizeof(attr_data.data.resident) ;
@@ -845,7 +882,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 			.name_length = 0,
 			.name_offset = 0,
 			.flags =  0 ,
-			.instance = (mrec->next_attr_instance) ++ ,
+			.instance = (new_mft_record->next_attr_instance) ++ ,
 			.data=
 			{
 				.resident=
@@ -875,7 +912,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 			.name_length = 0,
 			.name_offset = 0,
 			.flags =  0 ,
-			.instance = (mrec->next_attr_instance) ++ ,
+			.instance = (new_mft_record->next_attr_instance) ++ ,
 			.data=
 			{
 				.resident=
@@ -895,69 +932,59 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 
 
 	/**FIXME : it do not support hard link **/
-	mrec->link_count = cpu_to_le16(1);
+	new_mft_record->link_count = cpu_to_le16(1);
 	/** MUST set this **/
-	mrec->bytes_in_use = new_temp_offset;
+	new_mft_record->bytes_in_use = new_temp_offset;
 
-	flush_dcache_mft_record_page(ni);
-	mark_mft_record_dirty(ni);  /**ntfs_inode_mark_dirty(ni); int ntfs-3g**/
-	unmap_mft_record(ni);
+	flush_dcache_mft_record_page(new_ntfs_inode);
+	mark_mft_record_dirty(new_ntfs_inode);  /**ntfs_inode_mark_dirty(new_ntfs_inode); int ntfs-3g**/
+	unmap_mft_record(new_ntfs_inode);
 
-	(VFS_I(ni))->i_op = &ntfs_file_inode_ops;
-	(VFS_I(ni))->i_fop = &ntfs_file_ops;
+	(VFS_I(new_ntfs_inode))->i_op = &ntfs_file_inode_ops;
+	(VFS_I(new_ntfs_inode))->i_fop = &ntfs_file_ops;
 
-	if (NInoMstProtected(ni))
+	if (NInoMstProtected(new_ntfs_inode))
 	{
-		(VFS_I(ni))->i_mapping->a_ops = &ntfs_mst_aops;
+		(VFS_I(new_ntfs_inode))->i_mapping->a_ops = &ntfs_mst_aops;
 	}
 	else
 	{
-		(VFS_I(ni))->i_mapping->a_ops = &ntfs_normal_aops;
+		(VFS_I(new_ntfs_inode))->i_mapping->a_ops = &ntfs_normal_aops;
 	}
 
-	(VFS_I(ni))->i_blocks = ni->allocated_size >> 9;
+	(VFS_I(new_ntfs_inode))->i_blocks = new_ntfs_inode->allocated_size >> 9;
 
 
 	ntfs_debug("Done.");
-	return ni;
+	return new_ntfs_inode;
 err_out:
 	ntfs_debug("Failed.");
 
-	/* TODO : if ni->nr_extents had been set  should been clear here **/
-
-	if(fn)
-	{
-		kfree(fn);
-		fn=NULL;
-	}
-	if(si)
-	{
-		kfree(si);
-		si=NULL;
-	}
+	/* TODO : if new_ntfs_inode->nr_extents had been set  should been clear here **/
 	if(sd)
 	{
 		kfree(sd);
 		sd=NULL;
 	}
 
-	if(mrec)
+	if(new_mft_record)
 	{
-		if (ntfs_mft_record_free(ni->vol, ni,mrec))
+		if (ntfs_mft_record_free(new_ntfs_inode->vol, new_ntfs_inode,new_mft_record))
 		{
 			ntfs_debug("Failed to free MFT record.  "
 					"Leaving inconsistent metadata. Run chkdsk.\n");
 		}
-		inode_dec_link_count(VFS_I(ni)); //(VFS_I(ni))->i_nlink--;
-		unmap_mft_record(ni);
-		atomic_dec(&(VFS_I(ni))->i_count);
-		mrec=NULL;
+		inode_dec_link_count(VFS_I(new_ntfs_inode)); //(VFS_I(ni))->i_nlink--;
+		unmap_mft_record(new_ntfs_inode);
+		atomic_dec(&(VFS_I(new_ntfs_inode))->i_count);
+		new_mft_record=NULL;
 	}
 	return ERR_PTR(err);
 }
 
 /**
  * Some wrappers around __ntfs_create() ...
+ * Check the File type
  */
 ntfs_inode *ntfs_create(ntfs_inode *dir_ni, ntfschar *name, u8 name_len,
 		dev_t type)
@@ -974,7 +1001,7 @@ ntfs_inode *ntfs_create(ntfs_inode *dir_ni, ntfschar *name, u8 name_len,
 static int ntfs_create_inode(struct inode *dir,
 				struct dentry *dent,
 				umode_t mode, 
-				bool pn )
+				bool __unused )
 {
 	ntfschar *uname;
 	int uname_len;
@@ -986,15 +1013,19 @@ static int ntfs_create_inode(struct inode *dir,
 	{
 		if (uname_len != -ENAMETOOLONG)
 		{
-			ntfs_error(dir->i_sb, "Failed to convert name to Unicode.");
+			ntfs_error(dir->i_sb, "Failed to convert name[%s] to Unicode.",
+					dent->d_name.name);
 		}
 		return uname_len;
 	}
 
 
 	/* create file and inode */
-	ni = ntfs_create(NTFS_I(dir), uname, uname_len , mode & S_IFMT  );
-	kmem_cache_free(ntfs_name_cache, uname);
+	ni = ntfs_create(NTFS_I(dir), 
+			uname,  /* Unicode Name */
+			uname_len , /* Unicode Name length */
+			mode & S_IFMT  );
+	kmem_cache_free(ntfs_name_cache, uname);/* reclaim the memory that alloced in ntfs_nlstoucs */
 	if(likely(!IS_ERR(ni)))
 	{
 		d_instantiate(dent,VFS_I(ni));
@@ -1285,7 +1316,7 @@ int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen)
 			ntfs_debug("ntfs_lookup_inode_by_key faild ...");
 			goto err_out;
 		}
-/*********debug print
+	/*********debug print
 	{
 			struct qstr nls_name;
 			nls_name.name = NULL;
@@ -1302,7 +1333,7 @@ int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen)
 			ret = -EOPNOTSUPP;
 			goto err_out;
 		} ********/
-/*********debug print ********/
+	/*********debug print ********/
 
 		ret = ntfs_index_rm(icx);
 		if (ret == STATUS_OK)
@@ -1400,7 +1431,7 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 		dir_ni = dir_ni->ext.base_ntfs_ino;
 
 
-/******************************************* get fn ******************/
+	/******************************************* get fn ******************/
 	/*
 	 * Search for FILE_NAME attribute with such name. If it's in POSIX or
 	 * WIN32_AND_DOS namespace, then simply remove it from index and inode.
@@ -1414,14 +1445,14 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 	}
 	while (!ntfs_attr_lookup(AT_FILE_NAME, NULL, 0, CASE_SENSITIVE,
 			0, NULL, 0, actx)) {
-/*debuger need...
+	/*debuger need...
 		char *s;
 		**/
 		BOOL case_sensitive = IGNORE_CASE;
 
 		fn = (FILE_NAME_ATTR*)((u8*)actx->attr +
 				le16_to_cpu(actx->attr->data.resident.value_offset));
-/*debuger need...
+	/*debuger need...
 		s = ntfs_attr_name_get(fn->file_name, fn->file_name_length);
 		ntfs_debug("name: '%s'  type: %d  dos: %d  win32: %d  "
 			       "case: %d\n", s, fn->file_name_type,
@@ -1429,7 +1460,7 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 			       case_sensitive_match);
 		ntfs_attr_name_free(&s);
 		*/
-/** all ways use posix name
+	/** allways use posix name
 		if (looking_for_dos_name) {
 			if (fn->file_name_type == FILE_NAME_DOS)
 				break;
@@ -1453,7 +1484,7 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 			continue;
 		}
 		     
-/****all ways use posix case
+	/****all ways use posix case
 		if (fn->file_name_type == FILE_NAME_POSIX || case_sensitive_match)
 		*/
 			case_sensitive = CASE_SENSITIVE;
@@ -1475,9 +1506,9 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 			break;
 		}
 	}
-/******************************************* get fn ******************/
+	/******************************************* get fn ******************/
 	
-/*********** cut the entry down *****************/
+	/*********** cut the entry down *****************/
 	if ( (err = ntfs_index_remove(dir_ni, fn, le32_to_cpu(actx->attr->data.resident.value_length)) ) )
 	{
 		ntfs_debug("ntfs_index_remove error.");
@@ -1485,15 +1516,15 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 	}
 	
 	mrec->link_count = cpu_to_le16(le16_to_cpu( mrec->link_count) - 1);
-/*********** cut the entry down *****************/
+	/*********** cut the entry down *****************/
 
 
-/********************flush ***************/
+	/********************flush ***************/
 	flush_dcache_mft_record_page(ni);
 	mark_mft_record_dirty(ni);
-/********************flush end ***************/
+	/********************flush end ***************/
 
-/********************cut down all run list ***************/
+	/********************cut down all run list ***************/
 	ntfs_attr_put_search_ctx(actx);
 	actx = ntfs_attr_get_search_ctx(ni, mrec);
 	
@@ -1638,8 +1669,10 @@ static int ntfs_unlink_inode(struct inode *pi,struct dentry *pd)
  */
 const struct inode_operations ntfs_dir_inode_ops = {
 	.lookup	= ntfs_lookup,	/* VFS: Lookup directory. */
-	.create = ntfs_create_inode,
+	/* New Feature in 2.33 **/
+	.create = ntfs_create_inode, 
 	.unlink = ntfs_unlink_inode,
+	/* New Feature in 2.33 End **/
 };
 
 /**

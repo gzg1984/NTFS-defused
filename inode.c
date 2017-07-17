@@ -342,7 +342,7 @@ void ntfs_destroy_big_inode(struct inode *inode)
 {
 	ntfs_inode *ni = NTFS_I(inode);
 
-	ntfs_debug("Entering.");
+	ntfs_debug("Entering. Called by [%s]",current->comm);
 	BUG_ON(ni->page);
 	if (!atomic_dec_and_test(&ni->count))
 		BUG();

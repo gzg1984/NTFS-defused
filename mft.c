@@ -63,7 +63,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 	 */
 	index = (u64)ni->mft_no << vol->mft_record_size_bits >>
 			PAGE_SHIFT;
-	ofs = (ni->mft_no << vol->mft_record_size_bits) & ~PAGE_MASK;
+	ofs = offset_in_page((ni->mft_no << vol->mft_record_size_bits));
 
 	i_size = i_size_read(mft_vi);
 	/* The maximum valid index into the page cache for $MFT's data. */
@@ -71,7 +71,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 
 	/* If the wanted index is out of bounds the mft record doesn't exist. */
 	if (unlikely(index >= end_index)) {
-		if (index > end_index || (i_size & ~PAGE_MASK) < ofs +
+		if (index > end_index || offset_in_page(i_size) < ofs +
 				vol->mft_record_size) {
 			page = ERR_PTR(-ENOENT);
 			ntfs_error(vol->sb, "Attempt to read mft record 0x%lx, "
@@ -498,7 +498,7 @@ int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 	BUG_ON(!PageUptodate(page));
 	ClearPageUptodate(page);
 	/* Offset of the mft mirror record inside the page. */
-	page_ofs = (mft_no << vol->mft_record_size_bits) & ~PAGE_MASK;
+	page_ofs = offset_in_page(mft_no << vol->mft_record_size_bits) ;
 	/* The address in the page of the mirror copy of the mft record @m. */
 	kmirr = page_address(page) + page_ofs;
 	/* Copy the mst protected mft record to the mirror. */
@@ -1179,7 +1179,7 @@ static int ntfs_mft_bitmap_find_and_alloc_free_rec_nolock(ntfs_volume *vol,
 	for (; pass <= 2;) {
 		/* Cap size to pass_end. */
 		ofs = data_pos >> 3;
-		page_ofs = ofs & ~PAGE_MASK;
+		page_ofs = offset_in_page(ofs);
 		size = PAGE_SIZE - page_ofs;
 		ll = ((pass_end + 7) >> 3) - ofs;
 		if (size > ll)
@@ -1335,7 +1335,7 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(ntfs_volume *vol)
 		ntfs_error(vol->sb, "Failed to read from lcn bitmap.");
 		return PTR_ERR(page);
 	}
-	b = (u8*)page_address(page) + (ll & ~PAGE_MASK);
+	b = (u8*)page_address(page) + offset_in_page(ll);
 	tb = 1 << (lcn & 7ull);
 	down_write(&vol->lcnbmp_lock);
 	if (*b != 0xff && !(*b & tb)) {
@@ -2104,16 +2104,34 @@ static int ntfs_mft_record_format(const ntfs_volume *vol, const s64 mft_no)
 	 * The index into the page cache and the offset within the page cache
 	 * page of the wanted mft record.
 	 */
+	ntfs_debug("Current mft_no is 0x%llx.", mft_no);
+	ntfs_debug("Current vol->mft_record_size_bits is [%d].", vol->mft_record_size_bits);
+	ntfs_debug("Current PAGE_SHIFT is [%d].", PAGE_SHIFT );
 	index = mft_no << vol->mft_record_size_bits >> PAGE_SHIFT;
-	ofs = (mft_no << vol->mft_record_size_bits) & ~PAGE_MASK;
+	ntfs_debug("Current index = mft_no << vol->mft_record_size_bits >> PAGE_SHIFT;  [%ld].", index);
+	ofs = offset_in_page(mft_no << vol->mft_record_size_bits) ;
+	ntfs_debug("ofs  [%d].", ofs);
+	ntfs_debug("vol->mft_record_size is [%d].", vol->mft_record_size );
 	/* The maximum valid index into the page cache for $MFT's data. */
 	i_size = i_size_read(mft_vi);
+	ntfs_debug("Current Inode Size is 0x%llx.", i_size);
 	end_index = i_size >> PAGE_SHIFT;
-	if (unlikely(index >= end_index)) {
-		if (unlikely(index > end_index || ofs + vol->mft_record_size >=
-				(i_size & ~PAGE_MASK))) {
+	ntfs_debug("Current end_index is %ld.", end_index);
+
+	if (unlikely(index > end_index )) 
+	{
+		ntfs_error(vol->sb, "Tried to format non-existing mft "
+				"record 0x%llx. index[%ld] exceed the end[%ld]",
+			       	(long long)mft_no, index, end_index);
+		return -ENOENT;
+	}
+	if (unlikely(index == end_index)) {
+		if ( ofs + vol->mft_record_size > (offset_in_page(i_size))) {
 			ntfs_error(vol->sb, "Tried to format non-existing mft "
-					"record 0x%llx.", (long long)mft_no);
+					"record 0x%llx.  ofs[%d] + vol->mft_record_size[%d] i_size[0x%llx] (i_size & ~PAGE_MASK)[0x%lx] 0xdeadbeef[%X] "
+					"~PAGE_MASK =[0x%lx],PAGE_MASK[0x%lx] PAGE_SIZE=[0x%lx]",
+				       	(long long)mft_no, ofs , vol->mft_record_size ,i_size, (offset_in_page(i_size)), 0xdeadbeef,
+					~PAGE_MASK , PAGE_MASK, PAGE_SIZE);
 			return -ENOENT;
 		}
 	}
@@ -2276,6 +2294,7 @@ ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, const int mode,
 	BUG_ON(!mrec);
 	mft_ni = NTFS_I(vol->mft_ino);
 	mftbmp_ni = NTFS_I(vol->mftbmp_ino);
+	ntfs_debug("Will Down the rw_semaphore mftbmp_lock , count=[%d]",vol->mftbmp_lock.count);
 	down_write(&vol->mftbmp_lock);
 	bit = ntfs_mft_bitmap_find_and_alloc_free_rec_nolock(vol, base_ni);
 	if (bit >= 0) {
@@ -2435,14 +2454,26 @@ have_alloc_rec:
 	write_lock_irqsave(&mft_ni->size_lock, flags);
 	old_data_initialized = mft_ni->initialized_size;
 	old_data_size = vol->mft_ino->i_size;
+	ntfs_debug("Current ll is 0x%llX, mft_ni->initialized_size 0x%llX",
+			ll,mft_ni->initialized_size);
 	while (ll > mft_ni->initialized_size) {
 		s64 new_initialized_size, mft_no;
 		
 		new_initialized_size = mft_ni->initialized_size +
 				vol->mft_record_size;
 		mft_no = mft_ni->initialized_size >> vol->mft_record_size_bits;
+		ntfs_debug("Current initialized_size is 0x%llX, current size_bits is 0x%d",
+				mft_ni->initialized_size,vol->mft_record_size_bits );
+		ntfs_debug("new_initialized_size 0x%llX, i_size_read(vol->mft_ino) 0x%X",
+				new_initialized_size ,i_size_read(vol->mft_ino));
 		if (new_initialized_size > i_size_read(vol->mft_ino))
+		{
+			ntfs_debug("Change Inode vol->mft_ino[%p] to new_initialized_size[%llx]",
+				       	vol->mft_ino, new_initialized_size);
 			i_size_write(vol->mft_ino, new_initialized_size);
+			ntfs_debug("new_initialized_size 0x%llX, i_size_read(vol->mft_ino) 0x%X",
+					new_initialized_size ,i_size_read(vol->mft_ino));
+		}
 		write_unlock_irqrestore(&mft_ni->size_lock, flags);
 		ntfs_debug("Initializing mft record 0x%llx.",
 				(long long)mft_no);
@@ -2511,14 +2542,16 @@ mft_rec_already_initialized:
 	 * that it is allocated in the mft bitmap means that no-one will try to
 	 * allocate it either.
 	 */
+	ntfs_debug("Wakeup on lock rw_semaphore mftbmp_lock, count=[%d]",vol->mftbmp_lock.count);
 	up_write(&vol->mftbmp_lock);
 	/*
 	 * We now have allocated and initialized the mft record.  Calculate the
 	 * index of and the offset within the page cache page the record is in.
 	 */
 	index = bit << vol->mft_record_size_bits >> PAGE_SHIFT;
-	ofs = (bit << vol->mft_record_size_bits) & ~PAGE_MASK;
+	ofs = offset_in_page(bit << vol->mft_record_size_bits);
 	/* Read, map, and pin the page containing the mft record. */
+	ntfs_debug("Map the page. index[%d]",index);
 	page = ntfs_map_page(vol->mft_ino->i_mapping, index);
 	if (IS_ERR(page)) {
 		ntfs_error(vol->sb, "Failed to map page containing allocated "
@@ -2526,12 +2559,14 @@ mft_rec_already_initialized:
 		err = PTR_ERR(page);
 		goto undo_mftbmp_alloc;
 	}
+	ntfs_debug("Lock this page.");
 	lock_page(page);
 	BUG_ON(!PageUptodate(page));
 	ClearPageUptodate(page);
 	m = (MFT_RECORD*)((u8*)page_address(page) + ofs);
 	/* If we just formatted the mft record no need to do it again. */
 	if (!record_formatted) {
+		ntfs_debug("Page s not formatted.");
 		/* Sanity check that the mft record is really not in use. */
 		if (ntfs_is_file_record(m->magic) &&
 				(m->flags & MFT_RECORD_IN_USE)) {
@@ -2574,10 +2609,12 @@ mft_rec_already_initialized:
 	m->flags |= MFT_RECORD_IN_USE;
 	if (S_ISDIR(mode))
 		m->flags |= MFT_RECORD_IS_DIRECTORY;
+	ntfs_debug("Flush this page ");
 	flush_dcache_page(page);
 	SetPageUptodate(page);
 	if (base_ni) {
 		MFT_RECORD *m_tmp;
+		ntfs_debug("Handling Base NTFS inode ");
 
 		/*
 		 * Setup the base mft record in the extent mft record.  This
@@ -2627,6 +2664,7 @@ mft_rec_already_initialized:
 		 * is set to 1 but the mft record->link_count is 0.  The caller
 		 * needs to bear this in mind.
 		 */
+		ntfs_debug("Handling NO Base NTFS inode ");
 		vi = new_inode(vol->sb);
 		if (unlikely(!vi)) {
 			err = -ENOMEM;

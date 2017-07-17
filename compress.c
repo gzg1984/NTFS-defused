@@ -26,6 +26,8 @@
 #include <linux/blkdev.h>
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
+#include <linux/version.h>
+
 
 #include "attrib.h"
 #include "inode.h"
@@ -670,7 +672,11 @@ lock_retry_remap:
 		}
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_read_sync;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 		submit_bh(REQ_OP_READ, 0, tbh);
+#else
+		submit_bh(READ, tbh);
+#endif
 	}
 
 	/* Wait for io completion on all buffer heads. */
