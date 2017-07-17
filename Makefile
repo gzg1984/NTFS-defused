@@ -28,7 +28,7 @@ modules:
 help:
 	$(MAKE) -C $(KERNEL_SRC) M=$$PWD help
 
-modules_install : default
+modules_install : modules
 	$(MAKE) -C $(KERNEL_SRC) M=$$PWD modules_install
 
 clean:
