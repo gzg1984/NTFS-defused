@@ -21,6 +21,7 @@
 
 #ifdef NTFS_RW
 
+#include <linux/version.h>
 #include <linux/types.h>
 #include <linux/fs.h>
 #include <linux/highmem.h>
@@ -822,7 +823,11 @@ map_vcn:
 			 * completed ignore errors afterwards as we can assume
 			 * that if one buffer worked all of them will work.
 			 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 			submit_bh(REQ_OP_WRITE, 0, bh);
+#else
+			submit_bh(WRITE, bh);
+#endif
 			if (should_wait) {
 				should_wait = false;
 				wait_on_buffer(bh);

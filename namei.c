@@ -20,6 +20,7 @@
  * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <linux/version.h>
 #include <linux/dcache.h>
 #include <linux/exportfs.h>
 #include <linux/security.h>
@@ -253,7 +254,11 @@ handle_name:
 		err = (signed)nls_name.len;
 		goto err_out;
 	}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 	nls_name.hash = full_name_hash(dent, nls_name.name, nls_name.len);
+#else
+        nls_name.hash = full_name_hash(nls_name.name, nls_name.len);
+#endif
 
 	dent = d_add_ci(dent, dent_inode, &nls_name);
 	kfree(nls_name.name);

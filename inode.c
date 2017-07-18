@@ -19,6 +19,7 @@
  * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <linux/version.h>
 #include <linux/buffer_head.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
@@ -2813,7 +2814,11 @@ done:
 	 * for real.
 	 */
 	if (!IS_NOCMTIME(VFS_I(base_ni)) && !IS_RDONLY(VFS_I(base_ni))) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 		struct timespec now = current_time(VFS_I(base_ni));
+#else
+		struct timespec now = current_kernel_time();
+#endif
 		int sync_it = 0;
 
 		if (!timespec_equal(&VFS_I(base_ni)->i_mtime, &now) ||
@@ -2893,7 +2898,11 @@ int ntfs_setattr(struct dentry *dentry, struct iattr *attr)
 	int err;
 	unsigned int ia_valid = attr->ia_valid;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 	err = setattr_prepare(dentry, attr);
+#else
+        err = inode_change_ok(vi, attr);
+#endif
 	if (err)
 		goto out;
 	/* We do not support NTFS ACLs yet. */

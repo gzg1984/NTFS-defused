@@ -1970,10 +1970,20 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (iov_iter_count(from) && !err)
 		written = ntfs_perform_write(file, from, iocb->ki_pos);
 	current->backing_dev_info = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 	inode_unlock(vi);
 	iocb->ki_pos += written;
 	if (likely(written > 0))
 		written = generic_write_sync(iocb, written);
+#else
+        mutex_unlock(&vi->i_mutex);
+        if (likely(written > 0)) {
+                err = generic_write_sync(file, iocb->ki_pos, written);
+                if (err < 0)
+                        written = 0;
+        }
+        iocb->ki_pos += written;
+#endif
 	return written ? written : err;
 }
 

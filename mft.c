@@ -20,6 +20,7 @@
  * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <linux/version.h>
 #include <linux/buffer_head.h>
 #include <linux/slab.h>
 #include <linux/swap.h>
@@ -593,7 +594,11 @@ int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 			clear_buffer_dirty(tbh);
 			get_bh(tbh);
 			tbh->b_end_io = end_buffer_write_sync;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 			submit_bh(REQ_OP_WRITE, 0, tbh);
+#else
+			submit_bh(WRITE, tbh);
+#endif
 		}
 		/* Wait on i/o completion of buffers. */
 		for (i_bhs = 0; i_bhs < nr_bhs; i_bhs++) {
@@ -786,7 +791,11 @@ int write_mft_record_nolock(ntfs_inode *ni, MFT_RECORD *m, int sync)
 		clear_buffer_dirty(tbh);
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_write_sync;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 		submit_bh(REQ_OP_WRITE, 0, tbh);
+#else
+		submit_bh(WRITE, tbh);
+#endif
 	}
 	/* Synchronize the mft mirror now if not @sync. */
 	if (!sync && ni->mft_no < vol->mftmirr_size)
@@ -2294,7 +2303,7 @@ ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, const int mode,
 	BUG_ON(!mrec);
 	mft_ni = NTFS_I(vol->mft_ino);
 	mftbmp_ni = NTFS_I(vol->mftbmp_ino);
-	ntfs_debug("Will Down the rw_semaphore mftbmp_lock , count=[%d]",vol->mftbmp_lock.count);
+	ntfs_debug("Will Down the rw_semaphore mftbmp_lock , count=[%ld]",vol->mftbmp_lock.count);
 	down_write(&vol->mftbmp_lock);
 	bit = ntfs_mft_bitmap_find_and_alloc_free_rec_nolock(vol, base_ni);
 	if (bit >= 0) {
@@ -2731,7 +2740,11 @@ mft_rec_already_initialized:
 
 		/* Set the inode times to the current time. */
 		vi->i_atime = vi->i_mtime = vi->i_ctime =
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 			current_time(vi);
+#else
+			current_kernel_time();
+#endif
 		/*
 		 * Set the file size to 0, the ntfs inode sizes are set to 0 by
 		 * the call to ntfs_init_big_inode() below.
