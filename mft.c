@@ -56,6 +56,10 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 	unsigned ofs;
 
 	BUG_ON(ni->page);
+	ntfs_debug("[%s]Entering for mft_no 0x%lx.",
+			current->comm, ni->mft_no);
+	ntfs_debug_ntfs_inode(ni);
+
 	/*
 	 * The index into the page cache and the offset within the page cache
 	 * page of the wanted mft record. FIXME: We need to check for
@@ -82,6 +86,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 			goto err_out;
 		}
 	}
+	ntfs_debug("[%s]Before ntfs_map_page 0x%lx.", current->comm, index);
 	/* Read, map, and pin the page. */
 	page = ntfs_map_page(mft_vi->i_mapping, index);
 	if (likely(!IS_ERR(page))) {
@@ -99,6 +104,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 		NVolSetErrors(vol);
 	}
 err_out:
+	ntfs_debug("[%s]Done.", current->comm);
 	ni->page = NULL;
 	ni->page_ofs = 0;
 	return (void*)page;
@@ -158,7 +164,8 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
 {
 	MFT_RECORD *m;
 
-	ntfs_debug("Entering for mft_no 0x%lx.", ni->mft_no);
+	ntfs_debug("[%s]Entering for mft_no 0x%lx.", 
+			current->comm,ni->mft_no);
 
 	/* Make sure the ntfs inode doesn't go away. */
 	atomic_inc(&ni->count);
@@ -166,9 +173,13 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
 	/* Serialize access to this mft record. */
 	mutex_lock(&ni->mrec_lock);
 
+	ntfs_debug_ntfs_inode(ni);
 	m = map_mft_record_page(ni);
 	if (likely(!IS_ERR(m)))
+	{
+		ntfs_debug("Success with [%p].", m);
 		return m;
+	}
 
 	mutex_unlock(&ni->mrec_lock);
 	atomic_dec(&ni->count);
@@ -942,7 +953,20 @@ bool ntfs_may_write_mft_record(ntfs_volume *vol, const unsigned long mft_no,
 	int i;
 	ntfs_attr na;
 
-	ntfs_debug("Entering for inode 0x%lx.", mft_no);
+	/* Write the record if it is not a mft record (type "FILE"). */
+	if (!ntfs_is_mft_record(m->magic)) {
+		ntfs_debug("Mft record 0x%lx is not a FILE record, write it.",
+				mft_no);
+		return true;
+	}
+	/* Write the mft record if it is a base inode. */
+	if (!m->base_mft_record) {
+		ntfs_debug("Mft record 0x%lx is a base record, write it.",
+				mft_no);
+		return true;
+	}
+
+	ntfs_debug("[%s]Entering for mft_no 0x%lx. Looking for it in icache", current->comm,mft_no);
 	/*
 	 * Normally we do not return a locked inode so set @locked_ni to NULL.
 	 */
@@ -952,7 +976,6 @@ bool ntfs_may_write_mft_record(ntfs_volume *vol, const unsigned long mft_no,
 	 * Check if the inode corresponding to this mft record is in the VFS
 	 * inode cache and obtain a reference to it if it is.
 	 */
-	ntfs_debug("Looking for inode 0x%lx in icache.", mft_no);
 	na.mft_no = mft_no;
 	na.name = NULL;
 	na.name_len = 0;
@@ -976,17 +999,21 @@ bool ntfs_may_write_mft_record(ntfs_volume *vol, const unsigned long mft_no,
 		vi = ilookup5_nowait(sb, mft_no, (test_t)ntfs_test_inode, &na);
 	}
 	if (vi) {
-		ntfs_debug("Base inode 0x%lx is in icache.", mft_no);
+		ntfs_debug("vfs inode address [0x%p] ", vi);
 		/* The inode is in icache. */
 		ni = NTFS_I(vi);
+
 		/* Take a reference to the ntfs inode. */
 		atomic_inc(&ni->count);
+
 		/* If the inode is dirty, do not write this record. */
 		if (NInoDirty(ni)) {
-			ntfs_debug("Inode 0x%lx is dirty, do not write it.",
+			ntfs_debug("mft_no 0x%lx is dirty, do not write it. will put it and return false",
 					mft_no);
+			ntfs_debug_ntfs_inode(ni);
 			atomic_dec(&ni->count);
 			iput(vi);
+			ntfs_debug("Done with Dirty Inode, return False.");
 			return false;
 		}
 		ntfs_debug("Inode 0x%lx is not dirty.", mft_no);
@@ -1009,18 +1036,6 @@ bool ntfs_may_write_mft_record(ntfs_volume *vol, const unsigned long mft_no,
 	}
 	ntfs_debug("Inode 0x%lx is not in icache.", mft_no);
 	/* The inode is not in icache. */
-	/* Write the record if it is not a mft record (type "FILE"). */
-	if (!ntfs_is_mft_record(m->magic)) {
-		ntfs_debug("Mft record 0x%lx is not a FILE record, write it.",
-				mft_no);
-		return true;
-	}
-	/* Write the mft record if it is a base inode. */
-	if (!m->base_mft_record) {
-		ntfs_debug("Mft record 0x%lx is a base record, write it.",
-				mft_no);
-		return true;
-	}
 	/*
 	 * This is an extent mft record.  Check if the inode corresponding to
 	 * its base mft record is in icache and obtain a reference to it if it
@@ -2463,29 +2478,17 @@ have_alloc_rec:
 	write_lock_irqsave(&mft_ni->size_lock, flags);
 	old_data_initialized = mft_ni->initialized_size;
 	old_data_size = vol->mft_ino->i_size;
-	ntfs_debug("Current ll is 0x%llX, mft_ni->initialized_size 0x%llX",
-			ll,mft_ni->initialized_size);
 	while (ll > mft_ni->initialized_size) {
 		s64 new_initialized_size, mft_no;
 		
 		new_initialized_size = mft_ni->initialized_size +
 				vol->mft_record_size;
 		mft_no = mft_ni->initialized_size >> vol->mft_record_size_bits;
-		ntfs_debug("Current initialized_size is 0x%llX, current size_bits is 0x%d",
-				mft_ni->initialized_size,vol->mft_record_size_bits );
-		ntfs_debug("new_initialized_size 0x%llX, i_size_read(vol->mft_ino) 0x%X",
-				new_initialized_size ,i_size_read(vol->mft_ino));
 		if (new_initialized_size > i_size_read(vol->mft_ino))
 		{
-			ntfs_debug("Change Inode vol->mft_ino[%p] to new_initialized_size[%llx]",
-				       	vol->mft_ino, new_initialized_size);
 			i_size_write(vol->mft_ino, new_initialized_size);
-			ntfs_debug("new_initialized_size 0x%llX, i_size_read(vol->mft_ino) 0x%X",
-					new_initialized_size ,i_size_read(vol->mft_ino));
 		}
 		write_unlock_irqrestore(&mft_ni->size_lock, flags);
-		ntfs_debug("Initializing mft record 0x%llx.",
-				(long long)mft_no);
 		err = ntfs_mft_record_format(vol, mft_no);
 		if (unlikely(err)) {
 			ntfs_error(vol->sb, "Failed to format mft record.");
@@ -2551,7 +2554,6 @@ mft_rec_already_initialized:
 	 * that it is allocated in the mft bitmap means that no-one will try to
 	 * allocate it either.
 	 */
-	ntfs_debug("Wakeup on lock rw_semaphore mftbmp_lock, count=[%d]",vol->mftbmp_lock.count);
 	up_write(&vol->mftbmp_lock);
 	/*
 	 * We now have allocated and initialized the mft record.  Calculate the
@@ -2560,7 +2562,6 @@ mft_rec_already_initialized:
 	index = bit << vol->mft_record_size_bits >> PAGE_SHIFT;
 	ofs = offset_in_page(bit << vol->mft_record_size_bits);
 	/* Read, map, and pin the page containing the mft record. */
-	ntfs_debug("Map the page. index[%d]",index);
 	page = ntfs_map_page(vol->mft_ino->i_mapping, index);
 	if (IS_ERR(page)) {
 		ntfs_error(vol->sb, "Failed to map page containing allocated "

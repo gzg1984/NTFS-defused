@@ -41,7 +41,32 @@
 #include "mft.h"
 #include "time.h"
 #include "ntfs.h"
+/* Gzged add: Debug */
+extern const char *get_attribute_type_name(le32 type)
+{
+	switch (type) {
+	case AT_UNUSED:			return "$UNUSED";
+	case AT_STANDARD_INFORMATION:   return "$STANDARD_INFORMATION";
+	case AT_ATTRIBUTE_LIST:         return "$ATTRIBUTE_LIST";
+	case AT_FILE_NAME:              return "$FILE_NAME";
+	case AT_OBJECT_ID:              return "$OBJECT_ID";
+	case AT_SECURITY_DESCRIPTOR:    return "$SECURITY_DESCRIPTOR";
+	case AT_VOLUME_NAME:            return "$VOLUME_NAME";
+	case AT_VOLUME_INFORMATION:     return "$VOLUME_INFORMATION";
+	case AT_DATA:                   return "$DATA";
+	case AT_INDEX_ROOT:             return "$INDEX_ROOT";
+	case AT_INDEX_ALLOCATION:       return "$INDEX_ALLOCATION";
+	case AT_BITMAP:                 return "$BITMAP";
+	case AT_REPARSE_POINT:          return "$REPARSE_POINT";
+	case AT_EA_INFORMATION:         return "$EA_INFORMATION";
+	case AT_EA:                     return "$EA";
+	case AT_PROPERTY_SET:           return "$PROPERTY_SET";
+	case AT_LOGGED_UTILITY_STREAM:  return "$LOGGED_UTILITY_STREAM";
+	case AT_END:                    return "$END";
+	}
 
+	return "$UNKNOWN";
+}
 /**
  * ntfs_test_inode - compare two (possibly fake) inodes for equality
  * @vi:		vfs inode which to test
@@ -2259,6 +2284,9 @@ void ntfs_clear_extent_inode(ntfs_inode *ni)
 void ntfs_evict_big_inode(struct inode *vi)
 {
 	ntfs_inode *ni = NTFS_I(vi);
+	ntfs_debug("[%s]Evicting VFS Inode",current->comm);
+	ntfs_debug_vfs_inode(vi);
+	ntfs_debug_ntfs_inode(ni);
 
 	truncate_inode_pages_final(&vi->i_data);
 	clear_inode(vi);
@@ -2268,7 +2296,9 @@ void ntfs_evict_big_inode(struct inode *vi)
 		bool was_bad = (is_bad_inode(vi));
 
 		/* Committing the inode also commits all extent inodes. */
+		ntfs_debug("[%s]Commiting VFS Inode[%p]",current->comm,vi);
 		ntfs_commit_inode(vi);
+		ntfs_debug("[%s]Commiting VFS Inode finish",current->comm);
 
 		if (!was_bad && (is_bad_inode(vi) || NInoDirty(ni))) {
 			ntfs_error(vi->i_sb, "Failed to commit dirty inode "
@@ -2981,9 +3011,10 @@ int __ntfs_write_inode(struct inode *vi, int sync)
 	STANDARD_INFORMATION *si;
 	int err = 0;
 	bool modified = false;
+	ntfs_debug("[%s] sync mode [%s]",current->comm, sync?"Sync":"Not Sync");
+	ntfs_debug_vfs_inode(vi);
+	ntfs_debug_ntfs_inode(ni);
 
-	ntfs_debug("Entering for %sinode 0x%lx.", NInoAttr(ni) ? "attr " : "",
-			vi->i_ino);
 	/*
 	 * Dirty attribute inodes are written via their real inodes so just
 	 * clean them here.  Access time updates are taken care off when the
@@ -2995,7 +3026,9 @@ int __ntfs_write_inode(struct inode *vi, int sync)
 		return 0;
 	}
 	/* Map, pin, and lock the mft record belonging to the inode. */
+	ntfs_debug("[%s] Trying map_mft_record ",current->comm);
 	m = map_mft_record(ni);
+	ntfs_debug("map_mft_record return [%p]",m);
 	if (IS_ERR(m)) {
 		err = PTR_ERR(m);
 		goto err_out;

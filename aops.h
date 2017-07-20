@@ -88,7 +88,11 @@ static inline void ntfs_unmap_page(struct page *page)
 static inline struct page *ntfs_map_page(struct address_space *mapping,
 		unsigned long index)
 {
-	struct page *page = read_mapping_page(mapping, index, NULL);
+	struct page *page = NULL;
+	ntfs_debug("[%s] map index 0x%lx.",
+			current->comm, index);
+	page = read_mapping_page(mapping, index, NULL);
+	ntfs_debug("after read_mapping_page.");
 
 	if (!IS_ERR(page)) {
 		kmap(page);

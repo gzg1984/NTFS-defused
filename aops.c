@@ -415,6 +415,7 @@ static int ntfs_readpage(struct file *file, struct page *page)
 	unsigned long flags;
 	u32 attr_len;
 	int err = 0;
+	ntfs_debug("[%s] Enter ntfs_readpage ",current->comm);
 
 retry_readpage:
 	BUG_ON(!PageLocked(page));
@@ -480,6 +481,7 @@ retry_readpage:
 	else
 		base_ni = ni->ext.base_ntfs_ino;
 	/* Map, pin, and lock the mft record. */
+	ntfs_debug("[%s] Before map_mft_record base_ni ",current->comm);
 	mrec = map_mft_record(base_ni);
 	if (IS_ERR(mrec)) {
 		err = PTR_ERR(mrec);
@@ -947,8 +949,11 @@ static int ntfs_write_mst_block(struct page *page,
 	bool sync, is_mft, page_is_dirty, rec_is_dirty;
 	unsigned char bh_size_bits;
 
-	ntfs_debug("Entering for inode 0x%lx, attribute type 0x%x, page index "
-			"0x%lx.", vi->i_ino, ni->type, page->index);
+	/* Gzged add: should not evict if I am using it **/
+	igrab(vi);
+
+	ntfs_debug("Entering for inode 0x%lx, attribute type 0x%x, page index 0x%lx.  PageLocked(%s) ", 
+			vi->i_ino, ni->type, page->index,PageLocked(page)?"Yes":"No");
 	BUG_ON(!NInoNonResident(ni));
 	BUG_ON(!NInoMstProtected(ni));
 	is_mft = (S_ISREG(vi->i_mode) && !vi->i_ino);
@@ -1341,6 +1346,8 @@ done:
 	}
 	if (likely(!err))
 		ntfs_debug("Done.");
+	/* Gzged: Put VI because I don't use any more **/
+	iput(vi);
 	return err;
 }
 
@@ -1466,6 +1473,7 @@ retry_writepage:
 	else
 		base_ni = ni->ext.base_ntfs_ino;
 	/* Map, pin, and lock the mft record. */
+	ntfs_debug("[%s] Before map_mft_record base_ni ",current->comm);
 	m = map_mft_record(base_ni);
 	if (IS_ERR(m)) {
 		err = PTR_ERR(m);
