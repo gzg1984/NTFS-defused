@@ -110,7 +110,7 @@ void __ntfs_error(const char *function, const struct super_block *sb,
 #ifdef DEBUG
 
 /* If 1, output debug messages, and if 0, don't. */
-int debug_msgs = 1;
+int debug_msgs = 0;
 
 
 

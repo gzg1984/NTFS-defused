@@ -31,3 +31,14 @@ https://flatcap.github.io/linux-ntfs/ntfs/
 Currently this source can work with 4.1 kernel.
 
 I am making a tag and go on for 4.4 kernel
+
+Debug Tips 
+===========================
+
+sysctl fs.ntfs-debug=1
+
+Or
+
+echo 1 > /proc/sys/fs/ntfs-debug
+
+

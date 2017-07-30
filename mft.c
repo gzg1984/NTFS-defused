@@ -2318,7 +2318,6 @@ ntfs_inode *ntfs_mft_record_alloc(ntfs_volume *vol, const int mode,
 	BUG_ON(!mrec);
 	mft_ni = NTFS_I(vol->mft_ino);
 	mftbmp_ni = NTFS_I(vol->mftbmp_ino);
-	ntfs_debug("Will Down the rw_semaphore mftbmp_lock , count=[%ld]",vol->mftbmp_lock.count);
 	down_write(&vol->mftbmp_lock);
 	bit = ntfs_mft_bitmap_find_and_alloc_free_rec_nolock(vol, base_ni);
 	if (bit >= 0) {

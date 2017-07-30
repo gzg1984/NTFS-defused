@@ -3071,12 +3071,13 @@ static struct dentry *ntfs_mount(struct file_system_type *fs_type,
 
 static struct file_system_type ntfs_fs_type = {
 	.owner		= THIS_MODULE,
-	.name		= "ntfs-native",
+	.name		= "ntfs",
 	.mount		= ntfs_mount,
 	.kill_sb	= kill_block_super,
 	.fs_flags	= FS_REQUIRES_DEV,
 };
 MODULE_ALIAS_FS("ntfs");
+MODULE_ALIAS_FS("ntfs-native");
 
 /* Stable names for the slab caches. */
 static const char ntfs_index_ctx_cache_name[] = "ntfs_index_ctx_cache";
@@ -3090,7 +3091,7 @@ static int __init init_ntfs_fs(void)
 	int err = 0;
 
 	/* This may be ugly but it results in pretty output so who cares. (-8 */
-	pr_info("driver " NTFS_VERSION " [Flags: R/"
+	pr_info("driver " NTFS_VERSION " [Flags: R"
 #ifdef NTFS_RW
 			"W"
 #else
@@ -3151,7 +3152,7 @@ static int __init init_ntfs_fs(void)
 	}
 
 	/* Register the ntfs sysctls. */
-	err = ntfs_sysctl(1);
+	err = ntfs_sysctl(1);/* 1 means add */
 	if (err) {
 		pr_crit("Failed to register NTFS sysctls!\n");
 		goto sysctl_err_out;
