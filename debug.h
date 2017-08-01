@@ -26,7 +26,6 @@
 
 #include "runlist.h"
 
-
 #ifdef DEBUG
 
 extern int debug_msgs;

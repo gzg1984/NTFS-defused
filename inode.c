@@ -19,7 +19,6 @@
  * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <linux/version.h>
 #include <linux/buffer_head.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
@@ -41,32 +40,7 @@
 #include "mft.h"
 #include "time.h"
 #include "ntfs.h"
-/* Gzged add: Debug */
-extern const char *get_attribute_type_name(le32 type)
-{
-	switch (type) {
-	case AT_UNUSED:			return "$UNUSED";
-	case AT_STANDARD_INFORMATION:   return "$STANDARD_INFORMATION";
-	case AT_ATTRIBUTE_LIST:         return "$ATTRIBUTE_LIST";
-	case AT_FILE_NAME:              return "$FILE_NAME";
-	case AT_OBJECT_ID:              return "$OBJECT_ID";
-	case AT_SECURITY_DESCRIPTOR:    return "$SECURITY_DESCRIPTOR";
-	case AT_VOLUME_NAME:            return "$VOLUME_NAME";
-	case AT_VOLUME_INFORMATION:     return "$VOLUME_INFORMATION";
-	case AT_DATA:                   return "$DATA";
-	case AT_INDEX_ROOT:             return "$INDEX_ROOT";
-	case AT_INDEX_ALLOCATION:       return "$INDEX_ALLOCATION";
-	case AT_BITMAP:                 return "$BITMAP";
-	case AT_REPARSE_POINT:          return "$REPARSE_POINT";
-	case AT_EA_INFORMATION:         return "$EA_INFORMATION";
-	case AT_EA:                     return "$EA";
-	case AT_PROPERTY_SET:           return "$PROPERTY_SET";
-	case AT_LOGGED_UTILITY_STREAM:  return "$LOGGED_UTILITY_STREAM";
-	case AT_END:                    return "$END";
-	}
 
-	return "$UNKNOWN";
-}
 /**
  * ntfs_test_inode - compare two (possibly fake) inodes for equality
  * @vi:		vfs inode which to test
@@ -368,7 +342,7 @@ void ntfs_destroy_big_inode(struct inode *inode)
 {
 	ntfs_inode *ni = NTFS_I(inode);
 
-	ntfs_debug("Entering. Called by [%s]",current->comm);
+	ntfs_debug("Entering.");
 	BUG_ON(ni->page);
 	if (!atomic_dec_and_test(&ni->count))
 		BUG();
@@ -2284,9 +2258,6 @@ void ntfs_clear_extent_inode(ntfs_inode *ni)
 void ntfs_evict_big_inode(struct inode *vi)
 {
 	ntfs_inode *ni = NTFS_I(vi);
-	ntfs_debug("[%s]Evicting VFS Inode",current->comm);
-	ntfs_debug_vfs_inode(vi);
-	ntfs_debug_ntfs_inode(ni);
 
 	truncate_inode_pages_final(&vi->i_data);
 	clear_inode(vi);
@@ -2296,9 +2267,7 @@ void ntfs_evict_big_inode(struct inode *vi)
 		bool was_bad = (is_bad_inode(vi));
 
 		/* Committing the inode also commits all extent inodes. */
-		ntfs_debug("[%s]Commiting VFS Inode[%p]",current->comm,vi);
 		ntfs_commit_inode(vi);
-		ntfs_debug("[%s]Commiting VFS Inode finish",current->comm);
 
 		if (!was_bad && (is_bad_inode(vi) || NInoDirty(ni))) {
 			ntfs_error(vi->i_sb, "Failed to commit dirty inode "
@@ -2844,11 +2813,7 @@ done:
 	 * for real.
 	 */
 	if (!IS_NOCMTIME(VFS_I(base_ni)) && !IS_RDONLY(VFS_I(base_ni))) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 		struct timespec now = current_time(VFS_I(base_ni));
-#else
-		struct timespec now = current_kernel_time();
-#endif
 		int sync_it = 0;
 
 		if (!timespec_equal(&VFS_I(base_ni)->i_mtime, &now) ||
@@ -2928,11 +2893,7 @@ int ntfs_setattr(struct dentry *dentry, struct iattr *attr)
 	int err;
 	unsigned int ia_valid = attr->ia_valid;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 	err = setattr_prepare(dentry, attr);
-#else
-        err = inode_change_ok(vi, attr);
-#endif
 	if (err)
 		goto out;
 	/* We do not support NTFS ACLs yet. */
@@ -3011,10 +2972,9 @@ int __ntfs_write_inode(struct inode *vi, int sync)
 	STANDARD_INFORMATION *si;
 	int err = 0;
 	bool modified = false;
-	ntfs_debug("[%s] sync mode [%s]",current->comm, sync?"Sync":"Not Sync");
-	ntfs_debug_vfs_inode(vi);
-	ntfs_debug_ntfs_inode(ni);
 
+	ntfs_debug("Entering for %sinode 0x%lx.", NInoAttr(ni) ? "attr " : "",
+			vi->i_ino);
 	/*
 	 * Dirty attribute inodes are written via their real inodes so just
 	 * clean them here.  Access time updates are taken care off when the
@@ -3026,9 +2986,7 @@ int __ntfs_write_inode(struct inode *vi, int sync)
 		return 0;
 	}
 	/* Map, pin, and lock the mft record belonging to the inode. */
-	ntfs_debug("[%s] Trying map_mft_record ",current->comm);
 	m = map_mft_record(ni);
-	ntfs_debug("map_mft_record return [%p]",m);
 	if (IS_ERR(m)) {
 		err = PTR_ERR(m);
 		goto err_out;

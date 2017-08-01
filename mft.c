@@ -1,7 +1,7 @@
 /**
  * mft.c - NTFS kernel mft record operations. Part of the Linux-NTFS project.
  *
- * Copyright (c) 2001-2012 Anton Altaparmakov and Tuxera Inc.
+ * Copyright (c) 2001-2017 Anton Altaparmakov and Tuxera Inc.
  * Copyright (c) 2002 Richard Russon
  *
  * This program/include file is free software; you can redistribute it and/or
@@ -20,7 +20,6 @@
  * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <linux/version.h>
 #include <linux/buffer_head.h>
 #include <linux/slab.h>
 #include <linux/swap.h>
@@ -56,10 +55,6 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 	unsigned ofs;
 
 	BUG_ON(ni->page);
-	ntfs_debug("[%s]Entering for mft_no 0x%lx.",
-			current->comm, ni->mft_no);
-	ntfs_debug_ntfs_inode(ni);
-
 	/*
 	 * The index into the page cache and the offset within the page cache
 	 * page of the wanted mft record. FIXME: We need to check for
@@ -86,7 +81,6 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 			goto err_out;
 		}
 	}
-	ntfs_debug("[%s]Before ntfs_map_page 0x%lx.", current->comm, index);
 	/* Read, map, and pin the page. */
 	page = ntfs_map_page(mft_vi->i_mapping, index);
 	if (likely(!IS_ERR(page))) {
@@ -104,7 +98,6 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 		NVolSetErrors(vol);
 	}
 err_out:
-	ntfs_debug("[%s]Done.", current->comm);
 	ni->page = NULL;
 	ni->page_ofs = 0;
 	return (void*)page;
@@ -164,8 +157,7 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
 {
 	MFT_RECORD *m;
 
-	ntfs_debug("[%s]Entering for mft_no 0x%lx.", 
-			current->comm,ni->mft_no);
+	ntfs_debug("Entering for mft_no 0x%lx.", ni->mft_no);
 
 	/* Make sure the ntfs inode doesn't go away. */
 	atomic_inc(&ni->count);
@@ -173,13 +165,9 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
 	/* Serialize access to this mft record. */
 	mutex_lock(&ni->mrec_lock);
 
-	ntfs_debug_ntfs_inode(ni);
 	m = map_mft_record_page(ni);
 	if (likely(!IS_ERR(m)))
-	{
-		ntfs_debug("Success with [%p].", m);
 		return m;
-	}
 
 	mutex_unlock(&ni->mrec_lock);
 	atomic_dec(&ni->count);
@@ -605,11 +593,7 @@ int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 			clear_buffer_dirty(tbh);
 			get_bh(tbh);
 			tbh->b_end_io = end_buffer_write_sync;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 			submit_bh(REQ_OP_WRITE, 0, tbh);
-#else
-			submit_bh(WRITE, tbh);
-#endif
 		}
 		/* Wait on i/o completion of buffers. */
 		for (i_bhs = 0; i_bhs < nr_bhs; i_bhs++) {
@@ -802,11 +786,7 @@ int write_mft_record_nolock(ntfs_inode *ni, MFT_RECORD *m, int sync)
 		clear_buffer_dirty(tbh);
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_write_sync;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 		submit_bh(REQ_OP_WRITE, 0, tbh);
-#else
-		submit_bh(WRITE, tbh);
-#endif
 	}
 	/* Synchronize the mft mirror now if not @sync. */
 	if (!sync && ni->mft_no < vol->mftmirr_size)
@@ -953,6 +933,7 @@ bool ntfs_may_write_mft_record(ntfs_volume *vol, const unsigned long mft_no,
 	int i;
 	ntfs_attr na;
 
+	ntfs_debug("Entering for inode 0x%lx.", mft_no);
 	/* Write the record if it is not a mft record (type "FILE"). */
 	if (!ntfs_is_mft_record(m->magic)) {
 		ntfs_debug("Mft record 0x%lx is not a FILE record, write it.",
@@ -965,8 +946,6 @@ bool ntfs_may_write_mft_record(ntfs_volume *vol, const unsigned long mft_no,
 				mft_no);
 		return true;
 	}
-
-	ntfs_debug("[%s]Entering for mft_no 0x%lx. Looking for it in icache", current->comm,mft_no);
 	/*
 	 * Normally we do not return a locked inode so set @locked_ni to NULL.
 	 */
@@ -976,6 +955,7 @@ bool ntfs_may_write_mft_record(ntfs_volume *vol, const unsigned long mft_no,
 	 * Check if the inode corresponding to this mft record is in the VFS
 	 * inode cache and obtain a reference to it if it is.
 	 */
+	ntfs_debug("Looking for inode 0x%lx in icache.", mft_no);
 	na.mft_no = mft_no;
 	na.name = NULL;
 	na.name_len = 0;
@@ -999,21 +979,17 @@ bool ntfs_may_write_mft_record(ntfs_volume *vol, const unsigned long mft_no,
 		vi = ilookup5_nowait(sb, mft_no, (test_t)ntfs_test_inode, &na);
 	}
 	if (vi) {
-		ntfs_debug("vfs inode address [0x%p] ", vi);
+		ntfs_debug("Base inode 0x%lx is in icache.", mft_no);
 		/* The inode is in icache. */
 		ni = NTFS_I(vi);
-
 		/* Take a reference to the ntfs inode. */
 		atomic_inc(&ni->count);
-
 		/* If the inode is dirty, do not write this record. */
 		if (NInoDirty(ni)) {
-			ntfs_debug("mft_no 0x%lx is dirty, do not write it. will put it and return false",
+			ntfs_debug("Inode 0x%lx is dirty, do not write it.",
 					mft_no);
-			ntfs_debug_ntfs_inode(ni);
 			atomic_dec(&ni->count);
 			iput(vi);
-			ntfs_debug("Done with Dirty Inode, return False.");
 			return false;
 		}
 		ntfs_debug("Inode 0x%lx is not dirty.", mft_no);
@@ -2128,34 +2104,16 @@ static int ntfs_mft_record_format(const ntfs_volume *vol, const s64 mft_no)
 	 * The index into the page cache and the offset within the page cache
 	 * page of the wanted mft record.
 	 */
-	ntfs_debug("Current mft_no is 0x%llx.", mft_no);
-	ntfs_debug("Current vol->mft_record_size_bits is [%d].", vol->mft_record_size_bits);
-	ntfs_debug("Current PAGE_SHIFT is [%d].", PAGE_SHIFT );
 	index = mft_no << vol->mft_record_size_bits >> PAGE_SHIFT;
-	ntfs_debug("Current index = mft_no << vol->mft_record_size_bits >> PAGE_SHIFT;  [%ld].", index);
 	ofs = offset_in_page(mft_no << vol->mft_record_size_bits) ;
-	ntfs_debug("ofs  [%d].", ofs);
-	ntfs_debug("vol->mft_record_size is [%d].", vol->mft_record_size );
 	/* The maximum valid index into the page cache for $MFT's data. */
 	i_size = i_size_read(mft_vi);
-	ntfs_debug("Current Inode Size is 0x%llx.", i_size);
 	end_index = i_size >> PAGE_SHIFT;
-	ntfs_debug("Current end_index is %ld.", end_index);
-
-	if (unlikely(index > end_index )) 
-	{
-		ntfs_error(vol->sb, "Tried to format non-existing mft "
-				"record 0x%llx. index[%ld] exceed the end[%ld]",
-			       	(long long)mft_no, index, end_index);
-		return -ENOENT;
-	}
-	if (unlikely(index == end_index)) {
-		if ( ofs + vol->mft_record_size > (offset_in_page(i_size))) {
+	if (unlikely(index >= end_index)) {
+		if (unlikely(index > end_index || ofs + vol->mft_record_size >
+				(i_size & ~PAGE_MASK))) {
 			ntfs_error(vol->sb, "Tried to format non-existing mft "
-					"record 0x%llx.  ofs[%d] + vol->mft_record_size[%d] i_size[0x%llx] (i_size & ~PAGE_MASK)[0x%lx] 0xdeadbeef[%X] "
-					"~PAGE_MASK =[0x%lx],PAGE_MASK[0x%lx] PAGE_SIZE=[0x%lx]",
-				       	(long long)mft_no, ofs , vol->mft_record_size ,i_size, (offset_in_page(i_size)), 0xdeadbeef,
-					~PAGE_MASK , PAGE_MASK, PAGE_SIZE);
+					"record 0x%llx.", (long long)mft_no);
 			return -ENOENT;
 		}
 	}
@@ -2484,10 +2442,10 @@ have_alloc_rec:
 				vol->mft_record_size;
 		mft_no = mft_ni->initialized_size >> vol->mft_record_size_bits;
 		if (new_initialized_size > i_size_read(vol->mft_ino))
-		{
 			i_size_write(vol->mft_ino, new_initialized_size);
-		}
 		write_unlock_irqrestore(&mft_ni->size_lock, flags);
+		ntfs_debug("Initializing mft record 0x%llx.",
+				(long long)mft_no);
 		err = ntfs_mft_record_format(vol, mft_no);
 		if (unlikely(err)) {
 			ntfs_error(vol->sb, "Failed to format mft record.");
@@ -2568,14 +2526,12 @@ mft_rec_already_initialized:
 		err = PTR_ERR(page);
 		goto undo_mftbmp_alloc;
 	}
-	ntfs_debug("Lock this page.");
 	lock_page(page);
 	BUG_ON(!PageUptodate(page));
 	ClearPageUptodate(page);
 	m = (MFT_RECORD*)((u8*)page_address(page) + ofs);
 	/* If we just formatted the mft record no need to do it again. */
 	if (!record_formatted) {
-		ntfs_debug("Page s not formatted.");
 		/* Sanity check that the mft record is really not in use. */
 		if (ntfs_is_file_record(m->magic) &&
 				(m->flags & MFT_RECORD_IN_USE)) {
@@ -2618,12 +2574,10 @@ mft_rec_already_initialized:
 	m->flags |= MFT_RECORD_IN_USE;
 	if (S_ISDIR(mode))
 		m->flags |= MFT_RECORD_IS_DIRECTORY;
-	ntfs_debug("Flush this page ");
 	flush_dcache_page(page);
 	SetPageUptodate(page);
 	if (base_ni) {
 		MFT_RECORD *m_tmp;
-		ntfs_debug("Handling Base NTFS inode ");
 
 		/*
 		 * Setup the base mft record in the extent mft record.  This
@@ -2673,7 +2627,6 @@ mft_rec_already_initialized:
 		 * is set to 1 but the mft record->link_count is 0.  The caller
 		 * needs to bear this in mind.
 		 */
-		ntfs_debug("Handling NO Base NTFS inode ");
 		vi = new_inode(vol->sb);
 		if (unlikely(!vi)) {
 			err = -ENOMEM;
@@ -2740,11 +2693,7 @@ mft_rec_already_initialized:
 
 		/* Set the inode times to the current time. */
 		vi->i_atime = vi->i_mtime = vi->i_ctime =
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 			current_time(vi);
-#else
-			current_kernel_time();
-#endif
 		/*
 		 * Set the file size to 0, the ntfs inode sizes are set to 0 by
 		 * the call to ntfs_init_big_inode() below.

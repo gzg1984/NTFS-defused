@@ -1,7 +1,7 @@
 /*
  * super.c - NTFS kernel super block handling. Part of the Linux-NTFS project.
  *
- * Copyright (c) 2001-2012 Anton Altaparmakov and Tuxera Inc.
+ * Copyright (c) 2001-2017 Anton Altaparmakov and Tuxera Inc.
  * Copyright (c) 2001,2002 Richard Russon
  *
  * This program/include file is free software; you can redistribute it and/or
@@ -21,7 +21,6 @@
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <linux/version.h>
 #include <linux/stddef.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -1240,6 +1239,12 @@ static bool load_and_check_logfile(ntfs_volume *vol,
 
 #define NTFS_HIBERFIL_HEADER_SIZE	4096
 
+/* Magic identifiers present at the beginning of hiberfil.sys. */
+enum {
+	magic_hibr	= cpu_to_le32(0x72626968), /* 'hibr' */
+	magic_HIBR	= cpu_to_le32(0x52424948)  /* 'HIBR' */
+};
+
 /**
  * check_windows_hibernation_status - check if Windows is suspended on a volume
  * @vol:	ntfs super block of device to check
@@ -1254,22 +1259,18 @@ static bool load_and_check_logfile(ntfs_volume *vol,
  * for now this should do fine.
  *
  * If hiberfil.sys exists and is larger than 4kiB in size, we need to read the
- * hiberfil header (which is the first 4kiB).  If this begins with "hibr",
- * Windows is definitely suspended.  If it is completely full of zeroes,
- * Windows is definitely not hibernated.  Any other case is treated as if
- * Windows is suspended.  This caters for the above mentioned caveat of a
- * system with many volumes where no "hibr" magic would be present and there is
- * no zero header.
+ * hiberfil header (which is the first 4kiB).  If this begins with "HIBR",
+ * Windows is suspended.  If not then Windows is not suspended.
  *
- * Return 0 if Windows is not hibernated on the volume, >0 if Windows is
- * hibernated on the volume, and -errno on error.
+ * Return 0 if Windows is not hibernated, >0 if Windows is hibernated and
+ * -errno on error.
  */
 static int check_windows_hibernation_status(ntfs_volume *vol)
 {
 	MFT_REF mref;
 	struct inode *vi;
 	struct page *page;
-	u32 *kaddr, *kend;
+	u32 *kaddr;
 	ntfs_name *name = NULL;
 	int ret = 1;
 	static const ntfschar hiberfil[13] = { cpu_to_le16('h'),
@@ -1294,7 +1295,7 @@ static int check_windows_hibernation_status(ntfs_volume *vol)
 		/* If the file does not exist, Windows is not hibernated. */
 		if (ret == -ENOENT) {
 			ntfs_debug("hiberfil.sys not present.  Windows is not "
-					"hibernated on the volume.");
+					"hibernated.");
 			return 0;
 		}
 		/* A real error occurred. */
@@ -1314,8 +1315,7 @@ static int check_windows_hibernation_status(ntfs_volume *vol)
 	}
 	if (unlikely(i_size_read(vi) < NTFS_HIBERFIL_HEADER_SIZE)) {
 		ntfs_debug("hiberfil.sys is smaller than 4kiB (0x%llx).  "
-				"Windows is hibernated on the volume.  This "
-				"is not the system volume.", i_size_read(vi));
+				"Windows is hibernated.", i_size_read(vi));
 		goto iput_out;
 	}
 	page = ntfs_map_page(vi->i_mapping, 0);
@@ -1325,27 +1325,13 @@ static int check_windows_hibernation_status(ntfs_volume *vol)
 		goto iput_out;
 	}
 	kaddr = (u32*)page_address(page);
-	if (*(le32*)kaddr == cpu_to_le32(0x72626968)/*'hibr'*/) {
-		ntfs_debug("Magic \"hibr\" found in hiberfil.sys.  Windows is "
-				"hibernated on the volume.  This is the "
-				"system volume.");
+	if (*(le32*)kaddr == magic_hibr || *(le32*)kaddr == magic_HIBR) {
+		ntfs_debug("Magic \"%s\" found in hiberfil.sys.  Windows is "
+				"hibernated.", (*(le32*)kaddr == magic_HIBR) ?
+				"HIBR" : "hibr");
 		goto unm_iput_out;
 	}
-	kend = kaddr + NTFS_HIBERFIL_HEADER_SIZE/sizeof(*kaddr);
-	do {
-		if (unlikely(*kaddr)) {
-			ntfs_debug("hiberfil.sys is larger than 4kiB "
-					"(0x%llx), does not contain the "
-					"\"hibr\" magic, and does not have a "
-					"zero header.  Windows is hibernated "
-					"on the volume.  This is not the "
-					"system volume.", i_size_read(vi));
-			goto unm_iput_out;
-		}
-	} while (++kaddr < kend);
-	ntfs_debug("hiberfil.sys contains a zero header.  Windows is not "
-			"hibernated on the volume.  This is the system "
-			"volume.");
+	ntfs_debug("Windows is not hibernated.");
 	ret = 0;
 unm_iput_out:
 	ntfs_unmap_page(page);
@@ -3077,7 +3063,6 @@ static struct file_system_type ntfs_fs_type = {
 	.fs_flags	= FS_REQUIRES_DEV,
 };
 MODULE_ALIAS_FS("ntfs");
-MODULE_ALIAS_FS("ntfs-native");
 
 /* Stable names for the slab caches. */
 static const char ntfs_index_ctx_cache_name[] = "ntfs_index_ctx_cache";
@@ -3091,7 +3076,7 @@ static int __init init_ntfs_fs(void)
 	int err = 0;
 
 	/* This may be ugly but it results in pretty output so who cares. (-8 */
-	pr_info("driver " NTFS_VERSION " [Flags: R"
+	pr_info("driver " NTFS_VERSION " [Flags: R/"
 #ifdef NTFS_RW
 			"W"
 #else
@@ -3141,18 +3126,15 @@ static int __init init_ntfs_fs(void)
 
 	ntfs_big_inode_cache = kmem_cache_create(ntfs_big_inode_cache_name,
 			sizeof(big_ntfs_inode), 0,
-			SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-			| SLAB_ACCOUNT
-#endif
-			, ntfs_big_inode_init_once);
+			SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD|
+			SLAB_ACCOUNT, ntfs_big_inode_init_once);
 	if (!ntfs_big_inode_cache) {
 		pr_crit("Failed to create %s!\n", ntfs_big_inode_cache_name);
 		goto big_inode_err_out;
 	}
 
 	/* Register the ntfs sysctls. */
-	err = ntfs_sysctl(1);/* 1 means add */
+	err = ntfs_sysctl(1);
 	if (err) {
 		pr_crit("Failed to register NTFS sysctls!\n");
 		goto sysctl_err_out;

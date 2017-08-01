@@ -30,8 +30,6 @@
 #include <linux/writeback.h>
 #include <linux/bit_spinlock.h>
 #include <linux/bio.h>
-#include <linux/version.h>
-
 
 #include "aops.h"
 #include "attrib.h"
@@ -365,13 +363,7 @@ handle_zblock:
 		for (i = 0; i < nr; i++) {
 			tbh = arr[i];
 			if (likely(!buffer_uptodate(tbh)))
-			{
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 				submit_bh(REQ_OP_READ, 0, tbh);
-#else
-				submit_bh(READ, tbh);
-#endif
-			}
 			else
 				ntfs_end_buffer_async_read(tbh, 1);
 		}
@@ -415,7 +407,6 @@ static int ntfs_readpage(struct file *file, struct page *page)
 	unsigned long flags;
 	u32 attr_len;
 	int err = 0;
-	ntfs_debug("[%s] Enter ntfs_readpage ",current->comm);
 
 retry_readpage:
 	BUG_ON(!PageLocked(page));
@@ -481,7 +472,6 @@ retry_readpage:
 	else
 		base_ni = ni->ext.base_ntfs_ino;
 	/* Map, pin, and lock the mft record. */
-	ntfs_debug("[%s] Before map_mft_record base_ni ",current->comm);
 	mrec = map_mft_record(base_ni);
 	if (IS_ERR(mrec)) {
 		err = PTR_ERR(mrec);
@@ -888,11 +878,7 @@ lock_retry_remap:
 	do {
 		struct buffer_head *next = bh->b_this_page;
 		if (buffer_async_write(bh)) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 			submit_bh(REQ_OP_WRITE, 0, bh);
-#else
-			submit_bh(WRITE, bh);
-#endif
 			need_end_writeback = false;
 		}
 		bh = next;
@@ -949,11 +935,8 @@ static int ntfs_write_mst_block(struct page *page,
 	bool sync, is_mft, page_is_dirty, rec_is_dirty;
 	unsigned char bh_size_bits;
 
-	/* Gzged add: should not evict if I am using it **/
-	igrab(vi);
-
-	ntfs_debug("Entering for inode 0x%lx, attribute type 0x%x, page index 0x%lx.  PageLocked(%s) ", 
-			vi->i_ino, ni->type, page->index,PageLocked(page)?"Yes":"No");
+	ntfs_debug("Entering for inode 0x%lx, attribute type 0x%x, page index "
+			"0x%lx.", vi->i_ino, ni->type, page->index);
 	BUG_ON(!NInoNonResident(ni));
 	BUG_ON(!NInoMstProtected(ni));
 	is_mft = (S_ISREG(vi->i_mode) && !vi->i_ino);
@@ -1220,11 +1203,7 @@ lock_retry_remap:
 		BUG_ON(!buffer_mapped(tbh));
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_write_sync;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 		submit_bh(REQ_OP_WRITE, 0, tbh);
-#else
-		submit_bh(WRITE, tbh);
-#endif
 	}
 	/* Synchronize the mft mirror now if not @sync. */
 	if (is_mft && !sync)
@@ -1346,8 +1325,6 @@ done:
 	}
 	if (likely(!err))
 		ntfs_debug("Done.");
-	/* Gzged: Put VI because I don't use any more **/
-	iput(vi);
 	return err;
 }
 
@@ -1473,7 +1450,6 @@ retry_writepage:
 	else
 		base_ni = ni->ext.base_ntfs_ino;
 	/* Map, pin, and lock the mft record. */
-	ntfs_debug("[%s] Before map_mft_record base_ni ",current->comm);
 	m = map_mft_record(base_ni);
 	if (IS_ERR(m)) {
 		err = PTR_ERR(m);

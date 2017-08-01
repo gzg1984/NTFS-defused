@@ -599,41 +599,20 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 	 * Iterate over attributes in mft record starting at @ctx->attr, or the
 	 * attribute following that, if @ctx->is_first is 'true'.
 	 */
-	ntfs_debug("Entering. type=[0x%x] is_first[%d]", type,ctx->is_first);
 	if (ctx->is_first) {
 		a = ctx->attr;
 		ctx->is_first = false;
-	} 
-	else
-	{
+	} else
 		a = (ATTR_RECORD*)((u8*)ctx->attr +
 				le32_to_cpu(ctx->attr->length));
-	}
-
 	for (;;	a = (ATTR_RECORD*)((u8*)a + le32_to_cpu(a->length))) {
 		if ((u8*)a < (u8*)ctx->mrec || (u8*)a > (u8*)ctx->mrec +
 				le32_to_cpu(ctx->mrec->bytes_allocated))
-		{
-			ntfs_error(vol->sb, "IN LOOP breaker."
-						"type=[0x%x],a->type[0x%x],a->length[%d],"
-						"a[%p],ctx->mrec[%p],ctx->mrec->bytes_allocated[%d]"
-						,type,a->type,a->length,
-						a,ctx->mrec,le32_to_cpu(ctx->mrec->bytes_allocated));
 			break;
-		}
 		ctx->attr = a;
-		if (type != AT_UNUSED)
-		{
 		if (unlikely(le32_to_cpu(a->type) > le32_to_cpu(type) ||
 				a->type == AT_END))
 			return -ENOENT;
-		}
-		else
-		{
-			if ( a->type == AT_END)
-				return -ENOENT;
-		}
-
 		if (unlikely(!a->length))
 			break;
 		if (a->type != type)
@@ -1455,8 +1434,6 @@ int ntfs_attr_can_be_resident(const ntfs_volume *vol, const ATTR_TYPE type)
  */
 int ntfs_attr_record_resize(MFT_RECORD *m, ATTR_RECORD *a, u32 new_size)
 {
-	BUG_ON(!m);
-	BUG_ON(!a);
 	ntfs_debug("Entering for new_size %u.", new_size);
 	/* Align to 8 bytes if it is not already done. */
 	if (new_size & 7)
@@ -1478,7 +1455,6 @@ int ntfs_attr_record_resize(MFT_RECORD *m, ATTR_RECORD *a, u32 new_size)
 		if (new_size >= offsetof(ATTR_REC, length) + sizeof(a->length))
 			a->length = cpu_to_le32(new_size);
 	}
-	ntfs_debug("Done.");
 	return 0;
 }
 
