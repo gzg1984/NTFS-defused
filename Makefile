@@ -5,13 +5,9 @@ obj-$(CONFIG_NTFS_FS) += ntfs.o
 
 ntfs-y := aops.o attrib.o collate.o compress.o debug.o dir.o file.o \
 	  index.o inode.o mst.o namei.o runlist.o super.o sysctl.o \
-	  unistr.o upcase.o 
+	  unistr.o upcase.o mft.o 
 
 ntfs-$(CONFIG_NTFS_RW) += bitmap.o lcnalloc.o logfile.o quota.o usnjrnl.o
-
-# MFT manager
-ntfs-y += mft.o 
-
 
 ccflags-y := -DNTFS_VERSION=\"2.1.33\"
 ccflags-$(CONFIG_NTFS_DEBUG)	+= -DDEBUG
