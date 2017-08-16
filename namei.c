@@ -30,6 +30,7 @@
 #include "dir.h"
 #include "mft.h"
 #include "ntfs.h"
+#include "lcnalloc.h"
 
 /**
  * ntfs_lookup - find the inode represented by a dentry in a directory inode
@@ -159,7 +160,7 @@ static struct dentry *ntfs_lookup(struct inode *dir_ino, struct dentry *dent,
 					PTR_ERR(dent_inode));
 		kfree(name);
 		/* Return the error code. */
-		return ERR_CAST(dent_inode);
+		return (struct dentry *)dent_inode;
 	}
 	/* It is guaranteed that @name is no longer allocated at this point. */
 	if (MREF_ERR(mref) == -ENOENT) {
@@ -1308,32 +1309,11 @@ int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen)
 
 	while (1) 
 	{
-		/** use my func
-		if (ntfs_index_lookup(key, keylen, icx))
-		*/
 		if ( (ret = ntfs_lookup_inode_by_key (key, keylen, icx) ) )
 		{
 			ntfs_debug("ntfs_lookup_inode_by_key faild ...");
 			goto err_out;
 		}
-	/*********debug print
-	{
-			struct qstr nls_name;
-			nls_name.name = NULL;
-			nls_name.len = (unsigned)ntfs_ucstonls(ni->vol,
-			                ((FILE_NAME_ATTR *)icx->data)->file_name , icx->data_len,
-							                (unsigned char**)&nls_name.name, 0);
-			ntfs_debug("icx data name=[%s]",nls_name.name);
-			kfree(nls_name.name);
-	}
-
-		if (((FILE_NAME_ATTR *)icx->data)->file_attributes & FILE_ATTR_REPARSE_POINT) 
-		{
-			ntfs_debug("not support faild ");
-			ret = -EOPNOTSUPP;
-			goto err_out;
-		} ********/
-	/*********debug print ********/
 
 		ret = ntfs_index_rm(icx);
 		if (ret == STATUS_OK)
@@ -1354,8 +1334,8 @@ int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen)
 		ntfs_inode_mark_dirty(icx->actx->ntfs_ino);
 		ntfs_index_ctx_reinit(icx);
 		***************/
-        ntfs_index_ctx_put(icx);
-		ntfs_index_ctx_get(ni);
+		ntfs_index_ctx_put(icx);
+		icx=ntfs_index_ctx_get(ni);
 	}
 
 	/*
@@ -1386,23 +1366,26 @@ static __inline__ int ntfs_attrs_walk(ntfs_attr_search_ctx *ctx)
     return ntfs_attr_lookup(0, NULL, 0, CASE_SENSITIVE, 0, NULL, 0, ctx);
 }
 
-
-//static const char *es = "  Leaving inconsistent metadata.  Unmount and run chkdsk.";
-typedef bool BOOL;
-#include "lcnalloc.h"
-int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
+/**
+ * ntfs_delete - remove NTFS inode of the target from the NTFS inode of the folder
+ * @ni:	target of deleting
+ * @dir_ni: folder of the target
+ *
+ * Return 0 on success or errno from ntfs_delete 
+ * 
+ * Gzged port from ntfs-3g
+ */
+static int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 {
 	ntfs_attr_search_ctx *actx = NULL;
 	MFT_RECORD* mrec;
 	FILE_NAME_ATTR *fn = NULL;
 	ntfs_volume* vol=ni->vol;
-	/*
-	BOOL looking_for_dos_name = FALSE, looking_for_win32_name = FALSE;
-	BOOL case_sensitive_match = TRUE;
-	*/
 	int err = 0;
 
 	ntfs_debug("Entering");
+	BUG_ON(!ni);
+	BUG_ON(!dir_ni);
 
 	mrec = map_mft_record(ni);
 	if (IS_ERR(mrec)) {
@@ -1411,16 +1394,9 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 		goto err_out;
 	}
 
-    if ( (mrec->flags & MFT_RECORD_IS_DIRECTORY) )
+	if ( (mrec->flags & MFT_RECORD_IS_DIRECTORY) )
 	{
-		ntfs_debug("Invalid arguments.");
-		err=  -EINVAL;
-		goto err_out;
-	}
-	
-	if (!ni || !dir_ni ) 
-	{
-		ntfs_debug("Invalid arguments.");
+		ntfs_debug("Deleting Folder is not supported, cancelling.");
 		err=  -EINVAL;
 		goto err_out;
 	}
@@ -1430,50 +1406,24 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 	if (dir_ni->nr_extents == -1)
 		dir_ni = dir_ni->ext.base_ntfs_ino;
 
-
-	/******************************************* get fn ******************/
 	/*
 	 * Search for FILE_NAME attribute with such name. If it's in POSIX or
 	 * WIN32_AND_DOS namespace, then simply remove it from index and inode.
-	 * If filename in DOS or in WIN32 namespace, then remove DOS name first,
-	 * only then remove WIN32 name.
+	 *
+	 * If filename in DOS or in WIN32 namespace, doesn't support now
+	 * TODO: Port the DOS name support from ntfs-3g
 	 */
 	actx = ntfs_attr_get_search_ctx(ni, mrec);
 	if (!actx)
 	{
+		ntfs_debug("ntfs_attr_get_search_ctx Failed.");
 		goto err_out;
 	}
 	while (!ntfs_attr_lookup(AT_FILE_NAME, NULL, 0, CASE_SENSITIVE,
 			0, NULL, 0, actx)) {
-	/*debuger need...
-		char *s;
-		**/
-		BOOL case_sensitive = IGNORE_CASE;
 
 		fn = (FILE_NAME_ATTR*)((u8*)actx->attr +
 				le16_to_cpu(actx->attr->data.resident.value_offset));
-	/*debuger need...
-		s = ntfs_attr_name_get(fn->file_name, fn->file_name_length);
-		ntfs_debug("name: '%s'  type: %d  dos: %d  win32: %d  "
-			       "case: %d\n", s, fn->file_name_type,
-			       looking_for_dos_name, looking_for_win32_name,
-			       case_sensitive_match);
-		ntfs_attr_name_free(&s);
-		*/
-	/** allways use posix name
-		if (looking_for_dos_name) {
-			if (fn->file_name_type == FILE_NAME_DOS)
-				break;
-			else
-				continue;
-		}
-		if (looking_for_win32_name) {
-			if  (fn->file_name_type == FILE_NAME_WIN32)
-				break;
-			else
-				continue;
-		}
-		**/
 		
 		/* Ignore hard links from other directories */
 		if (dir_ni->mft_no != MREF_LE(fn->parent_directory)) {
@@ -1484,82 +1434,30 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 			continue;
 		}
 		     
-	/****all ways use posix case
-		if (fn->file_name_type == FILE_NAME_POSIX || case_sensitive_match)
-		*/
-			case_sensitive = CASE_SENSITIVE;
-		
-		/** all ways think name is equal 
-		if (ntfs_names_are_equal(fn->file_name, fn->file_name_length,
-					 name, name_len, case_sensitive, 
-					 ni->vol->upcase, ni->vol->upcase_len))*/ {
-			
-			/**  all ways think it`s posix name...
-			if (fn->file_name_type == FILE_NAME_WIN32) {
-				looking_for_dos_name = TRUE;
-				ntfs_attr_reinit_search_ctx(actx);
-				continue;
-			}
-			if (fn->file_name_type == FILE_NAME_DOS)
-				looking_for_dos_name = TRUE;
-				*/
-			break;
-		}
+		break;
 	}
-	/******************************************* get fn ******************/
 	
-	/*********** cut the entry down *****************/
-	if ( (err = ntfs_index_remove(dir_ni, fn, le32_to_cpu(actx->attr->data.resident.value_length)) ) )
+	if ( (err = ntfs_index_remove(dir_ni, fn, 
+		le32_to_cpu(actx->attr->data.resident.value_length)) ) )
 	{
 		ntfs_debug("ntfs_index_remove error.");
 		goto err_out;
 	}
 	
 	mrec->link_count = cpu_to_le16(le16_to_cpu( mrec->link_count) - 1);
-	/*********** cut the entry down *****************/
 
-
-	/********************flush ***************/
 	flush_dcache_mft_record_page(ni);
 	mark_mft_record_dirty(ni);
-	/********************flush end ***************/
 
-	/********************cut down all run list ***************/
 	ntfs_attr_put_search_ctx(actx);
+
 	actx = ntfs_attr_get_search_ctx(ni, mrec);
 	
-	err=  STATUS_OK ;
-	ntfs_debug("Before while ");
+	err =  STATUS_OK ;
 	while (!ntfs_attrs_walk(actx)) 
 	{
-		ntfs_debug("new loop ");
 		if (actx->attr->non_resident) 
 		{
-			ntfs_debug("Inner case ");
-			/*
-			runlist *rl;
-			rl = ntfs_mapping_pairs_decompress(ni->vol, actx->attr,
-					NULL);
-			if (!rl) {
-				err = -EOPNOTSUPP ;
-				ntfs_debug("Failed to decompress runlist.  "
-						"Leaving inconsistent metadata.\n");
-				continue;
-			}
-			if (ntfs_cluster_free_from_rl(ni->vol, rl)) {
-				err = -EOPNOTSUPP ;
-				ntfs_debug("Failed to free clusters.  "
-						"Leaving inconsistent metadata.\n");
-				continue;
-			}
-			free(rl);
-			*/
-
-			/* alloc_change < 0 */
-			/* Free the clusters. 
-			err = ntfs_cluster_free(ni, 0, -1, actx);*/
-			
-			ntfs_debug("before __ntfs_cluster_free ");
 			err = __ntfs_cluster_free(ni, 0, -1, actx, false);
 			if (unlikely(err < 0)) 
 			{
@@ -1569,21 +1467,7 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 				NVolSetErrors(vol);
 				err = 0;
 			}
-			/* Truncate the runlist.  NO NEED
-			err = ntfs_rl_truncate_nolock(vol, &ni->runlist, 0);
-			if (unlikely(err || IS_ERR(actx->mrec))) 
-			{
-				ntfs_error(vol->sb, "Failed to %s (error code %li).%s",
-						IS_ERR(actx->mrec) ?
-						"restore attribute search context" :
-						"truncate attribute runlist",
-						IS_ERR(actx->mrec) ? PTR_ERR(actx->mrec) : err, es);
-				err = -EIO;
-				goto err_out;
-			}*/
-			ntfs_debug("before flush_dcache_mft_record_page actx->ntfs_ino[%p]",actx->ntfs_ino);
 			flush_dcache_mft_record_page(actx->ntfs_ino);
-			ntfs_debug("before mark_mft_record_dirty actx->ntfs_ino[%p]",actx->ntfs_ino);
 			mark_mft_record_dirty(actx->ntfs_ino);
 		}
 	}
@@ -1593,16 +1477,9 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 				"Probably leaving inconsistent metadata.\n");
 	}
 	/* All extents should be attached after attribute walk. */
-	while (ni->nr_extents)
+	if (ni->nr_extents)
 	{
 		ntfs_error(vol->sb,"need use ntfs_extent_mft_record_free. not support now ");
-		/**FIXME
-		if ( ( err = ntfs_mft_record_free(ni->vol, *(ni->extent_nis) ))) 
-		{
-			ntfs_debug("Failed to free extent MFT record.  "
-					"Leaving inconsistent metadata.\n");
-		}
-		**/
 	}
 
 	if (ntfs_mft_record_free(ni->vol, ni,mrec)) 
@@ -1611,20 +1488,14 @@ int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 		ntfs_debug("Failed to free base MFT record.  "
 				"Leaving inconsistent metadata.\n");
 	}
-	/* FIXME */
 
 	flush_dcache_mft_record_page(ni);
 	mark_mft_record_dirty(ni);
-	/*FIXME:Gzged add */
-	ntfs_debug("before unmap_mft_record.");
+
 	unmap_mft_record(ni);
 	ni = NULL;
 	mrec=NULL;
 
-
-	/** Gzged shut now
-	ntfs_inode_update_times(dir_ni, NTFS_UPDATE_MCTIME);
-	*/
 err_out:
 	if (actx)
 		ntfs_attr_put_search_ctx(actx);
@@ -1642,27 +1513,36 @@ err_out:
 	}
 }
 
+/**
+ * ntfs_unlink_inode - remove dentry from the inode
+ * @pi:	folder inode
+ * @pd:	dentry that to be removed
+ *
+ * Delete NTFS inode of pd->d_inode under folder inode
+ * decrease the link count of pd->d_inode
+ *
+ * Return 0 on success or errno from ntfs_delete 
+ */
 static int ntfs_unlink_inode(struct inode *pi,struct dentry *pd)
 {
-	ntfs_inode* ni = NTFS_I(pd->d_inode);
-	int err = -ENOENT;
+	int err ;
 
 	ntfs_debug("Entering");
-	BUG_ON(!ni);
 
-	err =   ntfs_delete(ni,NTFS_I(pi));
+	err = ntfs_delete(NTFS_I(pd->d_inode),NTFS_I(pi));
 	if(err)
 	{
 		ntfs_debug("Faile");
-		return err;
 	}
 	else
 	{
-		(VFS_I(ni))->i_ctime = pi->i_ctime;
-		inode_dec_link_count(VFS_I(ni)); //(VFS_I(ni))->i_nlink--;
+		/** TODO: Set dirty after setting change time 
+			if the file still exist ?**/
+		pd->d_inode->i_ctime = pi->i_ctime;
+		inode_dec_link_count(VFS_I(ni)); 
 		ntfs_debug("Done");
-		return  err;
 	}
+	return err;
 }
 /**
  * Inode operations for directories.
