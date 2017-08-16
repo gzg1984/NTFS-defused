@@ -160,7 +160,7 @@ static struct dentry *ntfs_lookup(struct inode *dir_ino, struct dentry *dent,
 					PTR_ERR(dent_inode));
 		kfree(name);
 		/* Return the error code. */
-		return (struct dentry *)dent_inode;
+		return ERR_CAST(dent_inode);
 	}
 	/* It is guaranteed that @name is no longer allocated at this point. */
 	if (MREF_ERR(mref) == -ENOENT) {
