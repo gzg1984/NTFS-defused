@@ -83,9 +83,11 @@ int __ntfs_bitmap_set_bits_in_run(struct inode *vi, const s64 start_bit,
 
 	/* Set @pos to the position of the byte containing @start_bit. */
 	pos = (start_bit >> 3) & ~PAGE_MASK;
+	ntfs_debug("pos in page is 0x%lx. ",pos);
 
 	/* Calculate the position of @start_bit in the first byte. */
 	bit = start_bit & 7;
+	ntfs_debug("bit in byte is 0x%lx. ",bit);
 
 	/* If the first byte is partial, modify the appropriate bits in it. */
 	if (bit) {

@@ -1042,9 +1042,7 @@ static int ntfs_create_inode(struct inode *dir,
 
 }
 
-/************************* unlink support **********/
-
-/*
+/*TODO:
 static int ntfs_index_rm_node(ntfs_index_context *icx)
 {
 	int entry_pos, pindex;
@@ -1241,9 +1239,10 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 	
 	if (icx->entry->flags & INDEX_ENTRY_NODE) 
 	{ 
-	/* not support
+		ntfs_debug("INDEX_ENTRY_NODE Not supported now.");
+		/* TODO:
 		ret = ntfs_index_rm_node(icx); 
-	*/
+		*/
 		ret =  -EOPNOTSUPP ;
 		goto err_out;
 	} 
@@ -1362,7 +1361,7 @@ err_out:
 
 static __inline__ int ntfs_attrs_walk(ntfs_attr_search_ctx *ctx)
 {
-	/** case all attr **/
+    /** case all attr **/
     return ntfs_attr_lookup(0, NULL, 0, CASE_SENSITIVE, 0, NULL, 0, ctx);
 }
 
@@ -1371,7 +1370,7 @@ static __inline__ int ntfs_attrs_walk(ntfs_attr_search_ctx *ctx)
  * @ni:	target of deleting
  * @dir_ni: folder of the target
  *
- * Return 0 on success or errno from ntfs_delete 
+ * Return 0 on success or errno 
  * 
  * Gzged port from ntfs-3g
  */
