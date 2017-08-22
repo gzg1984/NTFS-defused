@@ -1257,10 +1257,10 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 			{
 				goto err_out;
 			}
-			ntfs_debug("Before flush_dcache_mft_record_page ");
+			ntfs_debug("icx->is_in_root:Before flush_dcache_mft_record_page ");
 			flush_dcache_mft_record_page(icx->actx->ntfs_ino);
 
-			ntfs_debug("Before mark_mft_record_dirty ");
+			ntfs_debug("icx->is_in_root:Before mark_mft_record_dirty ");
 			mark_mft_record_dirty(icx->actx->ntfs_ino);
 		} 
 		else
@@ -1271,9 +1271,7 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 				goto err_out;
 			}
 			*/
-			ntfs_debug("Before ntfs_index_entry_flush_dcache_page ");
 			ntfs_index_entry_flush_dcache_page(icx);
-			ntfs_debug("Before ntfs_index_entry_mark_dirty ");
 			ntfs_index_entry_mark_dirty(icx);
 		}
 	} 
@@ -1538,7 +1536,7 @@ static int ntfs_unlink_inode(struct inode *pi,struct dentry *pd)
 		/** TODO: Set dirty after setting change time 
 			if the file still exist ?**/
 		pd->d_inode->i_ctime = pi->i_ctime;
-		inode_dec_link_count(VFS_I(ni)); 
+		inode_dec_link_count(pi); 
 		ntfs_debug("Done");
 	}
 	return err;
