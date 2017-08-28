@@ -29,6 +29,10 @@
 #include "mft.h"
 #include "debug.h"
 #include "ntfs.h"
+#include "index.h"
+#include "layout.h"
+#include "types.h"
+
 
 /**
  * The little endian Unicode string $I30 as a global constant.
@@ -37,14 +41,17 @@ ntfschar I30[5] = { cpu_to_le16('$'), cpu_to_le16('I'),
 		cpu_to_le16('3'),	cpu_to_le16('0'), 0 };
 
 /**
- * ntfs_lookup_inode_by_name - find an inode in a directory given its name
- * @dir_ni:	ntfs inode of the directory in which to search for the name
- * @uname:	Unicode name for which to search in the directory
- * @uname_len:	length of the name @uname in Unicode characters
- * @res:	return the found file name if necessary (see below)
+ * ntfs_lookup_inode_by_key - fill ictx with information of the file 
+ *                             which have the given name as key
+ * @key:	Unicode name for which to search in the directory
+ * @key_len:	length of the name @uname in Unicode characters
+ * @ictx:	return the information of found file 
  *
- * Look for an inode with name @uname in the directory with inode @dir_ni.
- * ntfs_lookup_inode_by_name() walks the contents of the directory looking for
+ * Author: Gzged
+ * Caller is in namei.c
+ *
+ * Look for an inode with name @key in the directory with inode @ictx->idx_ni.
+ * ntfs_lookup_inode_by_key() walks the contents of the directory looking for
  * the Unicode name. If the name is found in the directory, the corresponding
  * inode number (>= 0) is returned as a mft reference in cpu format, i.e. it
  * is a 64-bit number containing the sequence number.
@@ -55,34 +62,8 @@ ntfschar I30[5] = { cpu_to_le16('$'), cpu_to_le16('I'),
  * inode number for being negative which you can extract using MREC(return
  * value).
  *
- * Note, @uname_len does not include the (optional) terminating NULL character.
+ * Note, @key_len does not include the (optional) terminating NULL character.
  *
- * Note, we look for a case sensitive match first but we also look for a case
- * insensitive match at the same time. If we find a case insensitive match, we
- * save that for the case that we don't find an exact match, where we return
- * the case insensitive match and setup @res (which we allocate!) with the mft
- * reference, the file name type, length and with a copy of the little endian
- * Unicode file name itself. If we match a file name which is in the DOS name
- * space, we only return the mft reference and file name type in @res.
- * ntfs_lookup() then uses this to find the long file name in the inode itself.
- * This is to avoid polluting the dcache with short file names. We want them to
- * work but we don't care for how quickly one can access them. This also fixes
- * the dcache aliasing issues.
- *
- * Locking:  - Caller must hold i_mutex on the directory.
- *	     - Each page cache page in the index allocation mapping must be
- *	       locked whilst being accessed otherwise we may find a corrupt
- *	       page due to it being under ->writepage at the moment which
- *	       applies the mst protection fixups before writing out and then
- *	       removes them again after the write is complete after which it 
- *	       unlocks the page.
- */
-#include "index.h"
-#include "layout.h"
-#include "types.h"
-
-/* Author: Gzged
- * Caller is in namei.c
  */
 int ntfs_lookup_inode_by_key (const void *key, const int key_len, ntfs_index_context *ictx)
 {

@@ -30,7 +30,6 @@
 #include "inode.h"
 #include "runlist.h"
 #include "volume.h"
-
 /**
  * ntfs_attr_search_ctx - used in attribute search functions
  * @mrec:	buffer containing mft record to search
@@ -60,6 +59,7 @@ typedef struct {
 	ATTR_RECORD *base_attr;
 } ntfs_attr_search_ctx;
 
+
 extern int ntfs_map_runlist_nolock(ntfs_inode *ni, VCN vcn,
 		ntfs_attr_search_ctx *ctx);
 extern int ntfs_map_runlist(ntfs_inode *ni, VCN vcn);
@@ -78,6 +78,10 @@ int ntfs_attr_lookup(const ATTR_TYPE type, const ntfschar *name,
 extern int load_attribute_list(ntfs_volume *vol, runlist *rl, u8 *al_start,
 		const s64 size, const s64 initialized_size);
 
+static __inline__ int ntfs_attrs_walk(ntfs_attr_search_ctx *ctx)
+{
+    return ntfs_attr_lookup(0, NULL, 0, CASE_SENSITIVE, 0, NULL, 0, ctx);
+}
 static inline s64 ntfs_attr_size(const ATTR_RECORD *a)
 {
 	if (!a->non_resident)

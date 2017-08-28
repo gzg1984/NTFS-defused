@@ -452,3 +452,587 @@ idx_err_out:
 	ntfs_error(sb, "Corrupt index.  Aborting lookup.");
 	goto err_out;
 }
+
+/** 
+ *  Find the median by going through all the entries
+ */
+static INDEX_ENTRY *ntfs_ie_get_median(INDEX_HEADER *ih)
+{
+	INDEX_ENTRY *ie, *ie_start;
+	u8 *ie_end;
+	int i = 0, median;
+	
+	ntfs_debug("Entering\n");
+	
+	ie = ie_start = ntfs_ie_get_first(ih);
+	ie_end   = (u8 *)ntfs_ie_get_end(ih);
+	
+	while ((u8 *)ie < ie_end && !ntfs_ie_end(ie)) {
+		ie = ntfs_ie_get_next(ie);
+		i++;
+	}
+	/*
+	 * NOTE: this could be also the entry at the half of the index block.
+	 */
+	median = i / 2 - 1;
+	
+	ntfs_debug("Entries: %d  median: %d\n", i, median);
+	
+	for (i = 0, ie = ie_start; i <= median; i++)
+		ie = ntfs_ie_get_next(ie);
+	
+	return ie;
+}
+
+static s64 ntfs_ib_vcn_to_pos(ntfs_index_context *icx, VCN vcn)
+{
+        return vcn << icx->idx_ni->itype.index.vcn_size_bits;
+}
+
+
+static s64 ntfs_ibm_vcn_to_pos(ntfs_index_context *icx, VCN vcn)
+{
+        return ntfs_ib_vcn_to_pos(icx, vcn) / icx->idx_ni->itype.index.block_size;
+}
+
+
+static VCN ntfs_ib_pos_to_vcn(ntfs_index_context *icx, s64 pos)
+{
+        return pos >> icx->idx_ni->itype.index.vcn_size_bits;
+}
+
+static s64 ntfs_ibm_pos_to_vcn(ntfs_index_context *icx, s64 pos)
+{
+        return ntfs_ib_pos_to_vcn(icx, pos * icx->idx_ni->itype.index.block_size);
+}
+
+
+/* Walk through all BITMAP data, 
+ * looking for a 0 and return the position */
+static VCN ntfs_ibm_get_free(ntfs_index_context *icx)
+{
+	u8 *bm;
+	int bit;
+	s64 vcn, byte, size;
+        s64 bmp_allocated_size;
+	struct inode *bmp_vi;
+        loff_t bvi_size;
+	int err = -ENOENT;
+        struct address_space *bmp_mapping;
+        struct page *bmp_page = NULL;
+
+
+        s64 bmp_pos;
+        int cur_bmp_pos;
+
+	ntfs_debug("Entering Inode 0x%lx, getting index bitmap.", VFS_I(icx->idx_ni)->i_ino);
+
+	bmp_vi = ntfs_attr_iget(VFS_I(icx->idx_ni), AT_BITMAP, icx->idx_ni->name, icx->idx_ni->name_len);
+	if (IS_ERR(bmp_vi)) {
+		ntfs_error(VFS_I(icx->idx_ni)->i_sb, "Failed to get bitmap attribute.");
+		err = PTR_ERR(bmp_vi);
+		goto err_out;
+	}
+        bmp_allocated_size = i_size_read(bmp_vi);
+	ntfs_debug("bmp_allocated_size is [%lld] PAGE_SIZE is [%lu]",
+		bmp_allocated_size, PAGE_SIZE);
+
+	bmp_mapping = bmp_vi->i_mapping;
+	/* Start from 0 */
+	bmp_pos = 0;
+	if (unlikely(bmp_pos >> 3 >= i_size_read(bmp_vi))) {
+		ntfs_error(VFS_I(icx->idx_ni)->i_sb, "Current index allocation position exceeds "
+				"index bitmap size.");
+		goto iput_err_out;
+	}
+	/* Get the starting bit position in the current bitmap page. */
+	cur_bmp_pos = bmp_pos & ((PAGE_SIZE * 8) - 1); /* bit in page */
+	bmp_pos &= ~(u64)((PAGE_SIZE * 8) - 1); /* bit before this page */
+get_next_bmp_page:
+	ntfs_debug("Reading bitmap with page index 0x%llx, bit ofs 0x%llx",
+			(unsigned long long)bmp_pos >> (3 + PAGE_SHIFT),
+			(unsigned long long)bmp_pos &
+			(unsigned long long)((PAGE_SIZE * 8) - 1));
+	bmp_page = ntfs_map_page(bmp_mapping,
+			bmp_pos >> (3 + PAGE_SHIFT));
+	if (IS_ERR(bmp_page)) {
+		ntfs_error(VFS_I(icx->idx_ni)->i_sb, "Reading index bitmap failed.");
+		err = PTR_ERR(bmp_page);
+		bmp_page = NULL;
+		goto error_out;
+	}
+	bm = (u8*)page_address(bmp_page);
+	/* Find next index block NOT in use. */
+	while ((bm[cur_bmp_pos >> 3] & (1 << (cur_bmp_pos & 7)))) 
+	{
+		cur_bmp_pos++;
+		/*
+		 * If we have reached the end of the bitmap page, get the next
+		 * page, and put away the old one.
+		 * cur_bmp_pos should not exceed PAGE_SIZE*8
+		 */
+		if (unlikely((cur_bmp_pos >> 3) >= PAGE_SIZE)) {
+			ntfs_unmap_page(bmp_page);
+			bmp_pos += PAGE_SIZE * 8;
+			cur_bmp_pos = 0;
+			goto get_next_bmp_page;
+		}
+		/* If we have reached the end of the bitmap, we are done. */
+		if (unlikely(((bmp_pos + cur_bmp_pos) >> 3) >= bmp_allocated_size))
+		{
+			ntfs_error(VFS_I(icx->idx_ni)->i_sb, "Need New data block for BITMAP, Not support now.");
+			goto err_out;
+/*
+			bmp_pos += PAGE_SIZE * 8;
+			cur_bmp_pos = 0;
+			break;
+*/
+		}
+	}
+	ntfs_debug("Handling index buffer 0x%llx.",
+			(unsigned long long)bmp_pos + cur_bmp_pos);
+	vcn = ntfs_ibm_pos_to_vcn(icx, bmp_pos + cur_bmp_pos);
+
+
+
+/*
+	size=PAGE_SIZE<bmp_allocated_size?PAGE_SIZE:bmp_allocated_size;
+
+	for (byte = 0; byte < size; byte++) {
+		
+		if (bm[byte] == 255)
+			continue;
+		
+		for (bit = 0; bit < 8; bit++) {
+			if (!(bm[byte] & (1 << bit))) {
+				vcn = ntfs_ibm_pos_to_vcn(icx, byte * 8 + bit);
+				goto out;
+			}
+		}
+	}
+	vcn = ntfs_ibm_pos_to_vcn(icx, size * 8);
+*/
+out:	
+	ntfs_debug("allocated vcn: %lld\n", (long long)vcn);
+	bm[cur_bmp_pos >> 3] |= (1 << (cur_bmp_pos & 7));
+	//set_page_dirty(page);
+	//put_page(page);
+
+
+/*
+
+	if (ntfs_ibm_set(icx, vcn))
+		vcn = (VCN)-1;
+	
+	free(bm);
+*/
+	return vcn;
+iput_err_out:
+err_out:
+error_out:
+        if (bmp_page) 
+                ntfs_unmap_page(bmp_page);
+
+	return (VCN)-1;
+}
+/**
+ * ntfs_ia_split - Split an INDEX_ALLOCATION
+ * 
+ * On success return STATUS_OK 
+ */
+static int ntfs_ia_split(ntfs_index_context *icx, INDEX_ALLOCATION *ib)
+{			  
+	INDEX_ENTRY *median;
+	VCN new_vcn;
+	int ret = STATUS_ERROR;
+
+	ntfs_debug("Entering\n");
+	
+	median  = ntfs_ie_get_median(&ib->index);
+	new_vcn = ntfs_ibm_get_free(icx);
+	if (new_vcn == -1)
+		return -ENOSPC;
+	
+/*
+	if (ntfs_ib_copy_tail(icx, ib, median, new_vcn)) {
+		ntfs_ibm_clear(icx, new_vcn);
+		return STATUS_ERROR;
+	}
+	
+	if (ntfs_icx_parent_vcn(icx) == VCN_INDEX_ROOT_PARENT)
+		ret = ntfs_ir_insert_median(icx, median, new_vcn);
+	else
+		ret = ntfs_ib_insert(icx, median, new_vcn);
+	
+	if (ret != STATUS_OK) {
+		ntfs_ibm_clear(icx, new_vcn);
+		return ret;
+	}
+	
+	ret = ntfs_ib_cut_tail(icx, ib, median);
+*/
+	
+	return ret;
+}
+
+/**
+ * ntfs_ir_truncate - Truncate index root attribute
+ * 
+ * Returns STATUS_OK, STATUS_RESIDENT_ATTRIBUTE_FILLED_MFT or STATUS_ERROR.
+ */
+static int ntfs_ir_truncate(ntfs_index_context *icx, int data_size)
+{			  
+/*
+	ntfs_attr *na;
+	*/
+	int ret;
+
+	ntfs_debug("Entering");
+	
+/**
+	na = ntfs_attr_open(icx->ni, AT_INDEX_ROOT, icx->name, icx->name_len);
+	if (!na) {
+		ntfs_log_perror("Failed to open INDEX_ROOT");
+		return STATUS_ERROR;
+	}
+	*/
+	/*
+	 *  INDEX_ROOT must be resident and its entries can be moved to 
+	 *  INDEX_BLOCK, so ENOSPC isn't a real error.
+	 */
+	ret = ntfs_resident_attr_value_resize(icx->actx->mrec, icx->actx->attr, data_size + offsetof(INDEX_ROOT, index) );
+	/*Gzged changed 
+	ret = ntfs_attr_truncate(na, data_size + offsetof(INDEX_ROOT, index));
+	*/
+	if (ret == STATUS_OK) 
+	{
+		/*
+		icx->ir = ntfs_ir_lookup2(icx->ni, icx->name, icx->name_len);
+		if (!icx->ir)
+			return STATUS_ERROR;
+			*/
+	
+		icx->ir->index.allocated_size = cpu_to_le32(data_size);
+		
+	} else if (ret == -EPERM)
+	{
+		ntfs_debug("Failed to truncate INDEX_ROOT");
+	}
+	
+/**
+	ntfs_attr_close(na);
+	*/
+	return ret;
+}
+		
+/**
+ * ntfs_ir_make_space - Make more space for the index root attribute
+ * 
+ * On success return STATUS_OK or STATUS_KEEP_SEARCHING.
+ * On error return STATUS_ERROR.
+ */
+static int ntfs_ir_make_space(ntfs_index_context *icx, int data_size)
+{			  
+	int ret;
+	ntfs_debug("Entering");
+	ret = ntfs_ir_truncate(icx, data_size);
+	/* TODO
+	if (ret == STATUS_RESIDENT_ATTRIBUTE_FILLED_MFT) 
+	{
+		ret = ntfs_ir_reparent(icx);
+		if (ret == STATUS_OK)
+			ret = STATUS_KEEP_SEARCHING;
+		else
+			ntfs_log_perror("Failed to nodify INDEX_ROOT");
+	}
+	*/
+	ntfs_debug("Done ");
+	return ret;
+}
+
+/**
+ *  Insert @ie index entry at @pos entry. Used @ih values should be ok already.
+ */
+static void ntfs_ie_insert(INDEX_HEADER *ih, INDEX_ENTRY *ie, INDEX_ENTRY *pos)
+{
+	int ie_size = le16_to_cpu(ie->length);
+	ntfs_debug("Entering");
+	ih->index_length = cpu_to_le32(le32_to_cpu(ih->index_length) + ie_size);
+	memmove((u8 *)pos + ie_size, pos, le32_to_cpu(ih->index_length) - ((u8 *)pos - (u8 *)ih) - ie_size);
+	memcpy(pos, ie, ie_size);
+	ntfs_debug("done");
+}
+
+/* Gzged port From NTFS-3g
+*/
+int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie)
+{
+	INDEX_HEADER *ih;
+	int allocated_size, new_size;
+	int ret = STATUS_ERROR;
+	ntfs_inode *idx_ni = icx->idx_ni;
+	ntfs_debug("Entering. ");
+	while (1) 
+	{
+		ret = ntfs_lookup_inode_by_key(&ie->key, le16_to_cpu(ie->key_length), 
+					/*output*/ icx) ;
+		if (!ret) 
+		{
+			ntfs_debug("Index already have such entry");
+			goto err_out;
+		}
+		if (ret != -ENOENT) 
+		{
+			ntfs_debug("Failed to find place for new entry");
+			goto err_out;
+		}
+
+		/* Found the place that should store the new INDEX_ENTRY,
+		 * detail is in icx */
+		if (icx->is_in_root)
+		{
+			BUG_ON(!icx->ir);
+			ih = &(icx->ir->index);
+		}
+		else
+		{
+			BUG_ON(!icx->ia);
+			ih = &(icx->ia->index);
+		}
+
+		allocated_size = le32_to_cpu(ih->allocated_size);
+		new_size = le32_to_cpu(ih->index_length) + le16_to_cpu(ie->length);
+	
+		ntfs_debug("index block sizes: allocated: %d  needed: %d", 
+				allocated_size, new_size);
+		if (new_size <= allocated_size)
+		{
+			/* Loop till there is enough space */
+			break;
+		}
+		/** else  it will make space for new index entry **/
+		
+		if (icx->is_in_root) 
+		{
+			ret = ntfs_ir_make_space(icx, new_size);
+			if ( ret )
+			{
+				ntfs_debug("ntfs_ir_make_space err ");
+				goto err_out;
+			}
+			else
+			{
+				ntfs_debug("ntfs_ir_make_space done ");
+			}
+		} 
+		else 
+		{
+			ret = ntfs_ia_split(icx, icx->ia);
+			if (ret )
+			{
+				ntfs_debug("ntfs_ib_split err ");
+				goto err_out;
+			}
+		}
+		
+		/*FIXME: Gzged mod
+		ntfs_inode_mark_dirty(icx->actx->ntfs_ino);
+		***/
+		/*FIXME: Gzged will fix these in furture */
+		flush_dcache_mft_record_page(icx->actx->ntfs_ino);
+		mark_mft_record_dirty(icx->actx->ntfs_ino);
+
+		/*FIXME: Gzged mod ntfs_index_ctx_reinit(icx); ***/
+		ntfs_index_ctx_put(icx);
+		ntfs_index_ctx_get(idx_ni);
+	}
+	
+	/* Insert the INDEX_ENTRY into the ih */
+	ntfs_ie_insert(ih, ie, icx->entry);
+
+	ntfs_index_entry_flush_dcache_page(icx);
+	ntfs_index_entry_mark_dirty(icx);
+	
+	ret = STATUS_OK;
+err_out:
+	ntfs_debug("%s", ret ? "Failed" : "Done");
+	return ret;
+}
+
+static int ntfs_ih_numof_entries(INDEX_HEADER *ih)
+{
+	int n;
+	INDEX_ENTRY *ie;
+	u8 *end;
+	
+	ntfs_debug("Entering");
+	
+	end = ntfs_ie_get_end(ih);
+	ie = ntfs_ie_get_first(ih);
+	for (n = 0; !ntfs_ie_end(ie) && (u8 *)ie < end; n++)
+		ie = ntfs_ie_get_next(ie);
+	return n;
+}
+
+
+static void ntfs_ie_delete(INDEX_HEADER *ih, INDEX_ENTRY *ie)
+{
+	u32 new_size;
+	ntfs_debug("Entering");
+	new_size = le32_to_cpu(ih->index_length) - le16_to_cpu(ie->length);
+	ih->index_length = cpu_to_le32(new_size);
+	memmove(ie, (u8 *)ie + le16_to_cpu(ie->length), new_size - ((u8 *)ie - (u8 *)ih));
+	ntfs_debug("Done");
+}
+/**
+ * ntfs_index_rm - remove entry from the index
+ * @icx:	index context describing entry to delete
+ *
+ * Delete entry described by @icx from the index. Index context is always 
+ * reinitialized after use of this function, so it can be used for index 
+ * lookup once again.
+ *
+ * Return 0 on success or -1 on error with errno set to the error code.
+ */
+static int ntfs_index_rm(ntfs_index_context *icx)
+{
+	INDEX_HEADER *ih;
+	int ret = STATUS_OK;
+
+	ntfs_debug("Entering");
+	
+	if (!icx || (!icx->ia && !icx->ir) || ntfs_ie_end(icx->entry)) 
+	{
+		ntfs_debug("Invalid arguments.");
+		ret = -EINVAL;
+		goto err_out;
+	}
+	if (icx->is_in_root)
+	{
+		ih = &icx->ir->index;
+	}
+	else
+	{
+		ih = &icx->ia->index;
+	}
+	
+	if (icx->entry->flags & INDEX_ENTRY_NODE) 
+	{ 
+		ntfs_debug("INDEX_ENTRY_NODE Not supported now.");
+		/* TODO:
+		ret = ntfs_index_rm_node(icx); 
+		*/
+		ret =  -EOPNOTSUPP ;
+		goto err_out;
+	} 
+	else if (icx->is_in_root || !ntfs_ih_one_entry(ih)) 
+	{
+		ntfs_ie_delete(ih, icx->entry);
+		
+		if (icx->is_in_root) 
+		{
+			ret = ntfs_ir_truncate(icx, le32_to_cpu(ih->index_length));
+			if (ret != STATUS_OK)
+			{
+				goto err_out;
+			}
+			ntfs_debug("icx->is_in_root:Before flush_dcache_mft_record_page ");
+			flush_dcache_mft_record_page(icx->actx->ntfs_ino);
+
+			ntfs_debug("icx->is_in_root:Before mark_mft_record_dirty ");
+			mark_mft_record_dirty(icx->actx->ntfs_ino);
+		} 
+		else
+		{
+			/* shut by Gzged
+			if (ntfs_icx_ib_write(icx))
+			{
+				goto err_out;
+			}
+			*/
+			ntfs_index_entry_flush_dcache_page(icx);
+			ntfs_index_entry_mark_dirty(icx);
+		}
+	} 
+	else 
+	{
+		ret =  -EOPNOTSUPP ;
+		goto err_out;
+		/** not support yet
+		if (ntfs_index_rm_leaf(icx))
+		{
+			goto err_out;
+		}
+		**/
+	}
+
+
+err_out:
+	ntfs_debug("Done ");
+	return ret;
+}
+/** 20091014 **/
+int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen)
+{
+	int ret = STATUS_ERROR;
+	ntfs_index_context *icx;
+
+	icx = ntfs_index_ctx_get(ni);
+	if (!icx)
+	{
+		return -1;
+	}
+
+	while (1) 
+	{
+		if ( (ret = ntfs_lookup_inode_by_key (key, keylen, icx) ) )
+		{
+			ntfs_debug("ntfs_lookup_inode_by_key faild ...");
+			goto err_out;
+		}
+
+		ret = ntfs_index_rm(icx);
+		if (ret == STATUS_OK)
+		{
+			ntfs_debug("ntfs_index_rm Done");
+			break;
+		}
+		else 
+		{
+			ntfs_debug("ntfs_index_rm faild");
+			goto err_out;
+		}
+		/*
+		flush_dcache_mft_record_page(icx->actx->ntfs_ino);
+		mark_mft_record_dirty(icx->actx->ntfs_ino);
+		*/
+		/*FIXME:Gzged change
+		ntfs_inode_mark_dirty(icx->actx->ntfs_ino);
+		ntfs_index_ctx_reinit(icx);
+		***************/
+		ntfs_index_ctx_put(icx);
+		icx=ntfs_index_ctx_get(ni);
+	}
+
+	/*
+	ntfs_debug("Before flush_dcache_mft_record_page ");
+	flush_dcache_mft_record_page(icx->actx->ntfs_ino);
+	ntfs_debug("Before mark_mft_record_dirty ");
+	mark_mft_record_dirty(icx->actx->ntfs_ino);
+	*/
+	/*
+	ntfs_debug("Before ntfs_index_entry_flush_dcache_page ");
+	ntfs_index_entry_flush_dcache_page(icx);
+	ntfs_debug("Before ntfs_index_entry_mark_dirty ");
+	ntfs_index_entry_mark_dirty(icx);
+	*/
+
+err_out:
+	ntfs_debug("Delete Done");
+	if(icx)
+	{
+		ntfs_index_ctx_put(icx);
+	}
+	return ret;
+}
+
