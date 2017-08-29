@@ -476,7 +476,7 @@ static INDEX_ENTRY *ntfs_ie_get_median(INDEX_HEADER *ih)
 	 */
 	median = i / 2 - 1;
 	
-	ntfs_debug("Entries: %d  median: %d\n", i, median);
+	ntfs_debug("Total Index Entries of current Index_Header: %d  median: %d\n", i, median);
 	
 	for (i = 0, ie = ie_start; i <= median; i++)
 		ie = ntfs_ie_get_next(ie);
@@ -508,7 +508,9 @@ static s64 ntfs_ibm_pos_to_vcn(ntfs_index_context *icx, s64 pos)
 
 
 /* Walk through all BITMAP data, 
- * looking for a 0 and return the position */
+ * looking for a 0 ,
+ * set it to 1 ,write to disk , 
+ * and return the position */
 static VCN ntfs_ibm_get_free(ntfs_index_context *icx)
 {
 	u8 *bm;
@@ -561,6 +563,7 @@ get_next_bmp_page:
 		bmp_page = NULL;
 		goto error_out;
 	}
+	/* directly mapped virtual address, no need to free */
 	bm = (u8*)page_address(bmp_page);
 	/* Find next index block NOT in use. */
 	while ((bm[cur_bmp_pos >> 3] & (1 << (cur_bmp_pos & 7)))) 
@@ -582,48 +585,17 @@ get_next_bmp_page:
 		{
 			ntfs_error(VFS_I(icx->idx_ni)->i_sb, "Need New data block for BITMAP, Not support now.");
 			goto err_out;
-/*
-			bmp_pos += PAGE_SIZE * 8;
-			cur_bmp_pos = 0;
-			break;
-*/
 		}
 	}
-	ntfs_debug("Handling index buffer 0x%llx.",
-			(unsigned long long)bmp_pos + cur_bmp_pos);
+	ntfs_debug("Handling index buffer [bit before page]0x%llx, [bit in page]0x%llx",
+			(unsigned long long)bmp_pos , (unsigned long long)cur_bmp_pos);
 	vcn = ntfs_ibm_pos_to_vcn(icx, bmp_pos + cur_bmp_pos);
-
-
-
-/*
-	size=PAGE_SIZE<bmp_allocated_size?PAGE_SIZE:bmp_allocated_size;
-
-	for (byte = 0; byte < size; byte++) {
-		
-		if (bm[byte] == 255)
-			continue;
-		
-		for (bit = 0; bit < 8; bit++) {
-			if (!(bm[byte] & (1 << bit))) {
-				vcn = ntfs_ibm_pos_to_vcn(icx, byte * 8 + bit);
-				goto out;
-			}
-		}
-	}
-	vcn = ntfs_ibm_pos_to_vcn(icx, size * 8);
-*/
 out:	
 	ntfs_debug("allocated vcn: %lld\n", (long long)vcn);
-	bm[cur_bmp_pos >> 3] |= (1 << (cur_bmp_pos & 7));
-	//set_page_dirty(page);
-	//put_page(page);
-
-
+	/* Set the bit to 1 and write to disk */
 /*
-
 	if (ntfs_ibm_set(icx, vcn))
 		vcn = (VCN)-1;
-	
 	free(bm);
 */
 	return vcn;
@@ -648,6 +620,8 @@ static int ntfs_ia_split(ntfs_index_context *icx, INDEX_ALLOCATION *ib)
 
 	ntfs_debug("Entering\n");
 	
+	/* First of All, copy the Index_Entry in [median,end] 
+	 * to the new Index_Allocation block */ 
 	median  = ntfs_ie_get_median(&ib->index);
 	new_vcn = ntfs_ibm_get_free(icx);
 	if (new_vcn == -1)
@@ -763,7 +737,13 @@ static void ntfs_ie_insert(INDEX_HEADER *ih, INDEX_ENTRY *ie, INDEX_ENTRY *pos)
 	ntfs_debug("done");
 }
 
-/* Gzged port From NTFS-3g
+/* Insert Index_Entry into
+ * Index_Root or Index_Allocation 
+ *
+ * @ntfs_index_context: is only used for directory,
+ * 	it contains Index_Root and Index_Allocation,
+ * 	which contain Index_Entry
+ * @ie: is the Index_Entry which should be insert
 */
 int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie)
 {
@@ -772,10 +752,11 @@ int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie)
 	int ret = STATUS_ERROR;
 	ntfs_inode *idx_ni = icx->idx_ni;
 	ntfs_debug("Entering. ");
+	/* Create Enough Space in Index_Root or Index_Allocation */
 	while (1) 
 	{
 		ret = ntfs_lookup_inode_by_key(&ie->key, le16_to_cpu(ie->key_length), 
-					/*output*/ icx) ;
+					 icx /*output*/ );
 		if (!ret) 
 		{
 			ntfs_debug("Index already have such entry");
@@ -811,7 +792,6 @@ int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie)
 			break;
 		}
 		/** else  it will make space for new index entry **/
-		
 		if (icx->is_in_root) 
 		{
 			ret = ntfs_ir_make_space(icx, new_size);

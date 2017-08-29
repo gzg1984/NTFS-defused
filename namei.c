@@ -298,14 +298,14 @@ void ntfs_index_ctx_put_I30(ntfs_index_context *ictx)
 	ntfs_index_ctx_put(ictx);
 }
 /**
- * ntfs_index_add_filename - add filename to directory index
+ * ntfs_create_index_entry - add filename to directory index
  * @ni:		ntfs inode describing directory to which index add filename
  * @fn:		FILE_NAME attribute to add
  * @mref:	reference of the inode which @fn describes
  *
  * Return 0 on success or -1 on error with errno set to the error code.
  */
-static int ntfs_index_add_filename(ntfs_inode *dir_ni, FILE_NAME_ATTR *fn, MFT_REF mref)
+static int ntfs_create_index_entry(ntfs_inode *dir_ni, FILE_NAME_ATTR *fn, MFT_REF mref)
 {
 	INDEX_ENTRY *ie;
 	ntfs_index_context *icx;
@@ -337,6 +337,9 @@ static int ntfs_index_add_filename(ntfs_inode *dir_ni, FILE_NAME_ATTR *fn, MFT_R
 		memcpy(&(ie->key.file_name), fn, fn_size);
 	}/**  END of create and set INDEX_entry **/
 	
+	/* Index Context is only used for directory,
+	 * it contains Index_Root and Index_Allocation,
+	 * which contain Index_Entry*/
 	icx =  ntfs_index_ctx_get(dir_ni);
 	if (!icx)
 	{
@@ -344,6 +347,8 @@ static int ntfs_index_add_filename(ntfs_inode *dir_ni, FILE_NAME_ATTR *fn, MFT_R
 		goto out;
 	}
 	
+	/* Insert Index_Entry into
+	 * Index_Root or Index_Allocation */
 	ret = ntfs_ie_add(icx, ie);
 out:
 	if(icx)
@@ -434,7 +439,7 @@ err_out:
 	return err;
 }
 
-static int ntfs_add_entry_to_index(
+static int ntfs_create_attr_file_name(
 		ntfs_inode *dir_ni,
 		ntfschar *name,
 		u8 name_len,
@@ -721,7 +726,6 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 		ntfs_debug("new $MFT File Record number [0x%x]",new_mft_record->mft_record_number);
 	}
 
-
 	/* Begin from here , error must goto err_out */
 	err = ntfs_create_attr_standard_infomation(new_mft_record,&new_temp_offset);
 	if(err)
@@ -737,7 +741,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	ntfs_create_attr_end(new_mft_record,&new_temp_offset);
 
 	/* Create FILE_NAME attribute  */
-	err = ntfs_add_entry_to_index(dir_ni,name,name_len,
+	err = ntfs_create_attr_file_name(dir_ni,name,name_len,
 			new_ntfs_inode,
 			new_mft_record,
 			&new_temp_offset,/*output*/
@@ -749,7 +753,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 
 	/* Add FILE_NAME attribute to the Stream in a new Index Entry,
 	 * Index Entry is in Index Record. */
-	err = ntfs_index_add_filename(dir_ni, fn, MK_MREF(new_ntfs_inode->mft_no, le16_to_cpu(new_ntfs_inode->seq_no)));
+	err = ntfs_create_index_entry(dir_ni, fn, MK_MREF(new_ntfs_inode->mft_no, le16_to_cpu(new_ntfs_inode->seq_no)));
 	if(fn)/* free fn anyway*/
 	{
 		kfree(fn);
