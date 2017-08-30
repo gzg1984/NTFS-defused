@@ -484,28 +484,14 @@ static INDEX_ENTRY *ntfs_ie_get_median(INDEX_HEADER *ih)
 	return ie;
 }
 
-static s64 ntfs_ib_vcn_to_pos(ntfs_index_context *icx, VCN vcn)
-{
-        return vcn << icx->idx_ni->itype.index.vcn_size_bits;
-}
-
-
 static s64 ntfs_ibm_vcn_to_pos(ntfs_index_context *icx, VCN vcn)
 {
         return ntfs_ib_vcn_to_pos(icx, vcn) / icx->idx_ni->itype.index.block_size;
 }
-
-
-static VCN ntfs_ib_pos_to_vcn(ntfs_index_context *icx, s64 pos)
-{
-        return pos >> icx->idx_ni->itype.index.vcn_size_bits;
-}
-
 static s64 ntfs_ibm_pos_to_vcn(ntfs_index_context *icx, s64 pos)
 {
         return ntfs_ib_pos_to_vcn(icx, pos * icx->idx_ni->itype.index.block_size);
 }
-
 
 /* Walk through all BITMAP data, 
  * looking for a 0 ,
@@ -592,12 +578,22 @@ get_next_bmp_page:
 	vcn = ntfs_ibm_pos_to_vcn(icx, bmp_pos + cur_bmp_pos);
 out:	
 	ntfs_debug("allocated vcn: %lld\n", (long long)vcn);
+
 	/* Set the bit to 1 and write to disk */
-/*
-	if (ntfs_ibm_set(icx, vcn))
-		vcn = (VCN)-1;
-	free(bm);
-*/
+	/* __ntfs_bitmap_set_bits_in_run ? */
+	lock_page(bmp_page);
+	BUG_ON(!PageUptodate(bmp_page));
+	ClearPageUptodate(bmp_page);
+	/* modify the content of the page */
+	bm[cur_bmp_pos >> 3] |= (1 << (cur_bmp_pos & 7));
+	/* Write to disk */
+	flush_dcache_page(bmp_page);
+	SetPageUptodate(bmp_page);
+	mark_ntfs_record_dirty(bmp_page, cur_bmp_pos >> 3);
+	unlock_page(bmp_page);
+	ntfs_unmap_page(bmp_page);
+	/* End of set bitmap */
+
 	return vcn;
 iput_err_out:
 err_out:

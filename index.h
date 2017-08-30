@@ -159,6 +159,15 @@ extern int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie);
 #define ntfs_ie_end(ie) (ie->flags & INDEX_ENTRY_END || !ie->length)
 #define ntfs_ie_get_next(ie) ((INDEX_ENTRY*)((char *)ie + le16_to_cpu(ie->length)))
 
+/* ntfs_index_context *icx
+ * s64 pos
+ * */
+#define ntfs_ib_pos_to_vcn(icx,pos) ( pos >> icx->idx_ni->itype.index.vcn_size_bits)
+/* ntfs_index_context *icx
+ * VCN vcn
+ * */
+#define ntfs_ib_vcn_to_pos(icx,vcn) ( vcn << icx->idx_ni->itype.index.vcn_size_bits)
+
 #define STATUS_OK	(0)
 #define STATUS_ERROR	(-1)
 

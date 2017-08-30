@@ -459,6 +459,7 @@ static int ntfs_create_attr_file_name(
 	fn = kcalloc(1,fn_len,GFP_KERNEL);
 	if (!fn) 
 	{
+		ntfs_error((VFS_I(dir_ni))->i_sb,"kcalloc failed for fn_len [%d]",fn_len);
 		err = -ENOMEM;
 		goto err_fail_alloc;
 	}
@@ -577,8 +578,8 @@ static void ntfs_create_attr_data( MFT_RECORD* const mrec,
  * Create SECURITY_DESCRIPTOR attribute (everyone has full access). */
 static int ntfs_create_attr_security_descriptor( MFT_RECORD* const mrec,
 		int* const pnew_offset )
-{ 
-	int err;
+{
+	int err = STATUS_OK;
 	ACL *acl;
 	ACCESS_ALLOWED_ACE *ace;
 	SID *sid;
@@ -735,6 +736,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	err = ntfs_create_attr_security_descriptor(new_mft_record,&new_temp_offset);
 	if(err)
 	{
+		ntfs_error((VFS_I(dir_ni))->i_sb,"ntfs_create_attr_security_descriptor failed.");
 		goto err_out;
 	}
 	ntfs_create_attr_data(new_mft_record,&new_temp_offset);
