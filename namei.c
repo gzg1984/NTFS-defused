@@ -274,29 +274,13 @@ err_out:
 	return ERR_PTR(err);
    }
 }
-
-ntfs_index_context * ntfs_index_ctx_get_I30(ntfs_inode *idx_ni)
-{
-    static ntfschar I30[5] = { cpu_to_le16('$'),
-	            cpu_to_le16('I'), 
-	            cpu_to_le16('3'), 
-	            cpu_to_le16('0'), 
-				0 };
-
-    struct inode * tmp_ino = ntfs_index_iget(VFS_I(idx_ni), I30, 4);
-    if (IS_ERR(tmp_ino)) {
-        ntfs_debug("Failed to load $I30 index.");
-        return NULL;
-    }
-
-	return ntfs_index_ctx_get(NTFS_I(tmp_ino));
-}
 void ntfs_index_ctx_put_I30(ntfs_index_context *ictx)
 {
 	ntfs_commit_inode(VFS_I(ictx->idx_ni));
 	iput(VFS_I(ictx->idx_ni));
 	ntfs_index_ctx_put(ictx);
 }
+#ifdef NTFS_RW
 /**
  * ntfs_create_index_entry - add filename to directory index
  * @ni:		ntfs inode describing directory to which index add filename
@@ -308,7 +292,6 @@ void ntfs_index_ctx_put_I30(ntfs_index_context *ictx)
 static int ntfs_create_index_entry(ntfs_inode *dir_ni, FILE_NAME_ATTR *fn, MFT_REF mref)
 {
 	INDEX_ENTRY *ie;
-	ntfs_index_context *icx;
 	int ret = -1;
 
 	ntfs_debug("Entering");
@@ -337,24 +320,10 @@ static int ntfs_create_index_entry(ntfs_inode *dir_ni, FILE_NAME_ATTR *fn, MFT_R
 		memcpy(&(ie->key.file_name), fn, fn_size);
 	}/**  END of create and set INDEX_entry **/
 	
-	/* Index Context is only used for directory,
-	 * it contains Index_Root and Index_Allocation,
-	 * which contain Index_Entry*/
-	icx =  ntfs_index_ctx_get(dir_ni);
-	if (!icx)
-	{
-		ret = PTR_ERR(icx);
-		goto out;
-	}
-	
 	/* Insert Index_Entry into
 	 * Index_Root or Index_Allocation */
-	ret = ntfs_ie_add(icx, ie);
+	ret = ntfs_ie_add(dir_ni, ie);
 out:
-	if(icx)
-	{
-		ntfs_index_ctx_put(icx);
-	}
 	if(ie)
 	{
 		kfree(ie);
@@ -1283,11 +1252,14 @@ static int ntfs_unlink_vfs_inode(struct inode *pi,struct dentry *pd)
 	}
 	return err;
 }
+#endif
 /**
  * Inode operations for directories.
  */
 const struct inode_operations ntfs_dir_inode_ops = {
 	.lookup	= ntfs_lookup,	/* VFS: Lookup directory. */
+#ifdef NTFS_RW
 	.create = ntfs_create_vfs_inode, 
 	.unlink = ntfs_unlink_vfs_inode,
+#endif
 };

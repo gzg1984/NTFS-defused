@@ -98,6 +98,19 @@ static inline struct page *ntfs_map_page(struct address_space *mapping,
 	return page;
 }
 
+int __ntfs_grab_cache_pages(struct address_space *mapping,
+		                pgoff_t index, const unsigned nr_pages, struct page **pages,
+				                struct page **cached_page);
+int ntfs_prepare_pages_for_non_resident_write(struct page **pages,
+		                unsigned nr_pages, s64 pos, size_t bytes);
+void ntfs_flush_dcache_pages(struct page **pages,
+		                unsigned nr_pages);
+int ntfs_commit_pages_after_write(struct page **pages,
+		                const unsigned nr_pages, s64 pos, size_t bytes);
+
+
+
+
 #ifdef NTFS_RW
 
 extern void mark_ntfs_record_dirty(struct page *page, const unsigned int ofs);

@@ -231,9 +231,6 @@ struct inode *ntfs_attr_iget(struct inode *base_vi, ATTR_TYPE type,
 	int err;
 	ntfs_attr na;
 
-	/* Make sure no one calls ntfs_attr_iget() for indices. */
-	BUG_ON(type == AT_INDEX_ALLOCATION);
-
 	na.mft_no = base_vi->i_ino;
 	na.type = type;
 	na.name = name;
@@ -285,37 +282,7 @@ struct inode *ntfs_attr_iget(struct inode *base_vi, ATTR_TYPE type,
 struct inode *ntfs_index_iget(struct inode *base_vi, ntfschar *name,
 		u32 name_len)
 {
-	struct inode *vi;
-	int err;
-	ntfs_attr na;
-
-	na.mft_no = base_vi->i_ino;
-	na.type = AT_INDEX_ALLOCATION;
-	na.name = name;
-	na.name_len = name_len;
-
-	vi = iget5_locked(base_vi->i_sb, na.mft_no, (test_t)ntfs_test_inode,
-			(set_t)ntfs_init_locked_inode, &na);
-	if (unlikely(!vi))
-		return ERR_PTR(-ENOMEM);
-
-	err = 0;
-
-	/* If this is a freshly allocated inode, need to read it now. */
-	if (vi->i_state & I_NEW) {
-		err = ntfs_read_locked_index_inode(base_vi, vi);
-		unlock_new_inode(vi);
-	}
-	/*
-	 * There is no point in keeping bad index inodes around.  This also
-	 * simplifies things in that we never need to check for bad index
-	 * inodes elsewhere.
-	 */
-	if (unlikely(err)) {
-		iput(vi);
-		vi = ERR_PTR(err);
-	}
-	return vi;
+	return ntfs_attr_iget(base_vi, AT_INDEX_ALLOCATION, name, name_len);
 }
 
 struct inode *ntfs_alloc_big_inode(struct super_block *sb)

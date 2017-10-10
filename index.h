@@ -145,13 +145,15 @@ static inline void ntfs_index_entry_mark_dirty(ntfs_index_context *ictx)
 				(u8*)ictx->ia - (u8*)page_address(ictx->page));
 }
 
-extern int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie);
+//extern int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie);
+extern int ntfs_ie_add(ntfs_inode *idx_ni, INDEX_ENTRY *ie);
+
 #endif /* NTFS_RW */
 
 /* INDEX_HEADER *ih
  */
-#define ntfs_ie_get_first(ih) ((INDEX_ENTRY*)((u8*)ih + le32_to_cpu(ih->entries_offset)))
-#define ntfs_ie_get_end(ih) ((u8*)ih + le32_to_cpu(ih->index_length))
+#define ntfs_ie_get_first(ih) ((INDEX_ENTRY*)((u8*)ih + le32_to_cpu((ih)->entries_offset)))
+#define ntfs_ie_get_end(ih) ((u8*)ih + le32_to_cpu((ih)->index_length))
 #define ntfs_ih_one_entry(ih) (ntfs_ih_numof_entries(ih) == 1)
 
 /* INDEX_ENTRY *ie

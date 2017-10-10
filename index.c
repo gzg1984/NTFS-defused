@@ -500,11 +500,13 @@ static s64 ntfs_ibm_pos_to_vcn(ntfs_index_context *icx, s64 pos)
 static VCN ntfs_ibm_get_free(ntfs_index_context *icx)
 {
 	u8 *bm;
-	int bit;
-	s64 vcn, byte, size;
+	//int bit;
+	s64 vcn;
+        //s64 byte;
+       	//s64 size;
         s64 bmp_allocated_size;
 	struct inode *bmp_vi;
-        loff_t bvi_size;
+        //loff_t bvi_size;
 	int err = -ENOENT;
         struct address_space *bmp_mapping;
         struct page *bmp_page = NULL;
@@ -576,21 +578,16 @@ get_next_bmp_page:
 	ntfs_debug("Handling index buffer [bit before page]0x%llx, [bit in page]0x%llx",
 			(unsigned long long)bmp_pos , (unsigned long long)cur_bmp_pos);
 	vcn = ntfs_ibm_pos_to_vcn(icx, bmp_pos + cur_bmp_pos);
-out:	
+//out:	
 	ntfs_debug("allocated vcn: %lld\n", (long long)vcn);
 
 	/* Set the bit to 1 and write to disk */
-	/* __ntfs_bitmap_set_bits_in_run ? */
-	lock_page(bmp_page);
-	BUG_ON(!PageUptodate(bmp_page));
-	ClearPageUptodate(bmp_page);
+	/*TODO: use __ntfs_bitmap_set_bits_in_run ? */
 	/* modify the content of the page */
 	bm[cur_bmp_pos >> 3] |= (1 << (cur_bmp_pos & 7));
 	/* Write to disk */
 	flush_dcache_page(bmp_page);
-	SetPageUptodate(bmp_page);
-	mark_ntfs_record_dirty(bmp_page, cur_bmp_pos >> 3);
-	unlock_page(bmp_page);
+	set_page_dirty(bmp_page);
 	ntfs_unmap_page(bmp_page);
 	/* End of set bitmap */
 
@@ -603,6 +600,162 @@ error_out:
 
 	return (VCN)-1;
 }
+
+/* Alloc and init the Index_Allocation
+ * */
+static INDEX_BLOCK *ntfs_ib_alloc(VCN ib_vcn, u32 ib_size, 
+				  INDEX_HEADER_FLAGS node_type)
+{
+	INDEX_BLOCK *ib;
+	int ih_size = sizeof(INDEX_HEADER);
+	
+	ntfs_debug("ib_vcn: %lld ib_size: %u\n", (long long)ib_vcn, ib_size);
+	
+	ib = kcalloc(1,ib_size,GFP_KERNEL );
+	if (!ib)
+		return NULL;
+	
+	ib->magic = magic_INDX;
+	ib->usa_ofs = cpu_to_le16(sizeof(INDEX_BLOCK));
+	ib->usa_count = cpu_to_le16(ib_size / NTFS_BLOCK_SIZE + 1);
+	/* Set USN to 1 */
+	*(le16 *)((char *)ib + le16_to_cpu(ib->usa_ofs)) = cpu_to_le16(1);
+	ib->lsn = cpu_to_sle64(0);
+	
+	ib->index_block_vcn = cpu_to_sle64(ib_vcn);
+	
+	ib->index.entries_offset = cpu_to_le32((ih_size +
+			le16_to_cpu(ib->usa_count) * 2 + 7) & ~7);
+	ib->index.index_length = cpu_to_le32(0);
+	ib->index.allocated_size = cpu_to_le32(ib_size - 
+					       (sizeof(INDEX_BLOCK) - ih_size));
+	ib->index.flags = node_type;
+	
+	return ib;
+}	
+
+static int ntfs_ib_write(ntfs_index_context *icx, INDEX_BLOCK *ib)
+{
+	s64 ret;
+	s64 status;
+       	s64 vcn = sle64_to_cpu(ib->index_block_vcn);
+	const s64 pos = ntfs_ib_vcn_to_pos(icx, vcn);
+       	const s64 bk_cnt = 1;
+        ntfs_inode *idx_ni=icx->idx_ni;
+       	const u32 bk_size  = idx_ni->itype.index.block_size;
+       	void *src = ib;
+	s64 written;
+       	s64 i;
+	struct address_space *mapping = VFS_I(idx_ni)->i_mapping;
+	int err;
+	struct page *pages[NTFS_MAX_PAGES_PER_CLUSTER];
+	struct page *cached_page = NULL;
+
+	ntfs_debug("vcn: %lld\n", (long long)vcn);
+	ntfs_debug("Entering for inode 0x%llx, pos 0x%llx.\n", (unsigned long long)idx_ni->mft_no, 
+			(long long)pos);
+	if ( bk_size % NTFS_BLOCK_SIZE) 
+	{
+		return -EINVAL;
+	}
+	err = pre_write_mst_fixup((NTFS_RECORD*) ((u8*)src ), bk_size);
+	if (err < 0) {
+		/* Abort write at this position. */
+		ntfs_error(VFS_I(icx->idx_ni)->i_sb, "%s #1", __FUNCTION__);
+		if (!i)
+			return err;
+	}
+	/***************************************/
+	{
+		pgoff_t start_idx = pos >> PAGE_SHIFT;
+
+		/* Get and lock @do_pages starting at index @start_idx. */
+		status = __ntfs_grab_cache_pages(mapping, start_idx, 1 /* only handle 1 page */,
+				pages, &cached_page);
+		if (unlikely(status))
+			return status;
+		/*
+		 * For non-resident attributes, we need to fill any holes with
+		 * actual clusters and ensure all bufferes are mapped.  We also
+		 * need to bring uptodate any buffers that are only partially
+		 * being written to.
+		 */
+		if (NInoNonResident(idx_ni)) {
+			status = ntfs_prepare_pages_for_non_resident_write(
+					pages, 1/* only handle 1 page */, pos, bk_size);
+			if (unlikely(status)) {
+				unlock_page(pages[0]);
+				put_page(pages[0]);
+				return status;
+			}
+		}
+		{
+			char *kaddr = kmap_atomic(pages[0]);
+			memcpy(kaddr,src,bk_size);
+
+		}
+		ntfs_flush_dcache_pages(pages , 1);
+		status = 0;
+		status = ntfs_commit_pages_after_write(pages, 1,
+				pos, bk_size);
+		if (!status)
+			written = bk_size;
+		unlock_page(pages[0]);
+		put_page(pages[0]);
+		if (unlikely(status < 0))
+			return -EINVAL;
+		cond_resched();
+	}
+
+
+	/*********************************************/
+
+	/* Quickly deprotect the data again. */
+	post_write_mst_fixup((NTFS_RECORD*)((u8*)src ));
+
+	if (written != bk_size)
+	{
+		return STATUS_ERROR;
+	}
+	else
+	{
+		return STATUS_OK;
+	}
+}
+
+static int ntfs_ib_copy_tail(ntfs_index_context *icx, INDEX_BLOCK *src,
+			     INDEX_ENTRY *median, VCN new_vcn)
+{
+	u8 *ies_end;
+	INDEX_ENTRY *ie_head;		/* first entry after the median */
+	int tail_size, ret;
+	INDEX_BLOCK *dst;
+        ntfs_inode *idx_ni=icx->idx_ni;
+       	const u32 bk_size  = idx_ni->itype.index.block_size;
+	
+	ntfs_debug("Entering\n");
+	
+	dst = ntfs_ib_alloc(new_vcn, bk_size, 
+			    src->index.flags & NODE_MASK);
+	if (!dst)
+		return STATUS_ERROR;
+	
+	ie_head = ntfs_ie_get_next(median);
+	
+	ies_end = (u8 *)ntfs_ie_get_end(&src->index);
+	tail_size = ies_end - (u8 *)ie_head;
+	memcpy(ntfs_ie_get_first(&dst->index), ie_head, tail_size);
+	
+	dst->index.index_length = cpu_to_le32(tail_size + 
+					      le32_to_cpu(dst->index.entries_offset));
+	/* dst includes the position and data of the new Index_Block ,
+	other things we need, is the volume information*/ 
+	ret = ntfs_ib_write(icx, dst);
+
+	kfree(dst);
+	return ret;
+}
+
 /**
  * ntfs_ia_split - Split an INDEX_ALLOCATION
  * 
@@ -622,12 +775,13 @@ static int ntfs_ia_split(ntfs_index_context *icx, INDEX_ALLOCATION *ib)
 	new_vcn = ntfs_ibm_get_free(icx);
 	if (new_vcn == -1)
 		return -ENOSPC;
-	
-/*
 	if (ntfs_ib_copy_tail(icx, ib, median, new_vcn)) {
-		ntfs_ibm_clear(icx, new_vcn);
+		/*TODO 
+		 * ntfs_ibm_clear(icx, new_vcn);
+		 * */
 		return STATUS_ERROR;
 	}
+/*
 	
 	if (ntfs_icx_parent_vcn(icx) == VCN_INDEX_ROOT_PARENT)
 		ret = ntfs_ir_insert_median(icx, median, new_vcn);
@@ -741,13 +895,22 @@ static void ntfs_ie_insert(INDEX_HEADER *ih, INDEX_ENTRY *ie, INDEX_ENTRY *pos)
  * 	which contain Index_Entry
  * @ie: is the Index_Entry which should be insert
 */
-int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie)
+int ntfs_ie_add(ntfs_inode *idx_ni, INDEX_ENTRY *ie)
 {
 	INDEX_HEADER *ih;
 	int allocated_size, new_size;
 	int ret = STATUS_ERROR;
-	ntfs_inode *idx_ni = icx->idx_ni;
+	ntfs_index_context *icx;
+
 	ntfs_debug("Entering. ");
+
+	icx =  ntfs_index_ctx_get(idx_ni);
+        if (!icx)
+        {
+                ret = PTR_ERR(icx);
+                goto out;
+        }
+
 	/* Create Enough Space in Index_Root or Index_Allocation */
 	while (1) 
 	{
@@ -831,6 +994,12 @@ int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie)
 	
 	ret = STATUS_OK;
 err_out:
+out:
+        if(icx)
+        {
+                ntfs_index_ctx_put(icx);
+		icx=NULL;
+        }
 	ntfs_debug("%s", ret ? "Failed" : "Done");
 	return ret;
 }

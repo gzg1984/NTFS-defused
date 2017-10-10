@@ -505,7 +505,7 @@ out:
  *
  * Note, the page locks are obtained in ascending page index order.
  */
-static inline int __ntfs_grab_cache_pages(struct address_space *mapping,
+int __ntfs_grab_cache_pages(struct address_space *mapping,
 		pgoff_t index, const unsigned nr_pages, struct page **pages,
 		struct page **cached_page)
 {
@@ -581,7 +581,7 @@ static inline int ntfs_submit_bh_for_read(struct buffer_head *bh)
  *
  * Return 0 on success or -errno on error.
  */
-static int ntfs_prepare_pages_for_non_resident_write(struct page **pages,
+int ntfs_prepare_pages_for_non_resident_write(struct page **pages,
 		unsigned nr_pages, s64 pos, size_t bytes)
 {
 	VCN vcn, highest_vcn = 0, cpos, cend, bh_cpos, bh_cend;
@@ -1371,7 +1371,7 @@ rl_not_mapped_enoent:
 	return err;
 }
 
-static inline void ntfs_flush_dcache_pages(struct page **pages,
+void ntfs_flush_dcache_pages(struct page **pages,
 		unsigned nr_pages)
 {
 	BUG_ON(!nr_pages);
@@ -1550,7 +1550,7 @@ err_out:
  *
  * Return 0 on success or -errno on error.
  */
-static int ntfs_commit_pages_after_write(struct page **pages,
+int ntfs_commit_pages_after_write(struct page **pages,
 		const unsigned nr_pages, s64 pos, size_t bytes)
 {
 	s64 end, initialized_size;
