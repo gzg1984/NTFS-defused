@@ -66,4 +66,25 @@ typedef enum {
 	IGNORE_CASE = 1,
 } IGNORE_CASE_BOOL;
 
+
+
+typedef u64 MFT_REF;
+typedef le64 leMFT_REF;
+typedef u8 FILE_NAME_TYPE_FLAGS;
+
+/*
+ * ntfs_name is used to return the file name to the caller of
+ * ntfs_lookup_inode_by_name() in order for the caller (namei.c::ntfs_lookup())
+ * to be able to deal with dcache aliasing issues.
+ */
+typedef struct {
+	MFT_REF mref;
+	FILE_NAME_TYPE_FLAGS type;
+	u8 len;
+	ntfschar name[0];
+} __attribute__ ((__packed__)) ntfs_name;
+
+/* The little endian Unicode string $I30 as a global constant. */
+extern ntfschar I30[5];
+
 #endif /* _LINUX_NTFS_TYPES_H */

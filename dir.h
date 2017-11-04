@@ -24,25 +24,20 @@
 #define _LINUX_NTFS_DIR_H
 
 #include "layout.h"
-#include "inode.h"
 #include "types.h"
+#include "inode.h"
 
 /*
- * ntfs_name is used to return the file name to the caller of
- * ntfs_lookup_inode_by_name() in order for the caller (namei.c::ntfs_lookup())
- * to be able to deal with dcache aliasing issues.
+ * int inline is_actor_exceed_root(const struct dir_context* actor, const ntfs_volume* vol)
+ **/
+#define is_actor_exceed_root(actor,vol) (actor->pos >= vol->mft_record_size) 
+/*
+ * void inline mark_actor_exceed_root(/--output--/struct  dir_context* actor,const ntfs_volume* vol)
  */
-typedef struct {
-	MFT_REF mref;
-	FILE_NAME_TYPE_FLAGS type;
-	u8 len;
-	ntfschar name[0];
-} __attribute__ ((__packed__)) ntfs_name;
-
-/* The little endian Unicode string $I30 as a global constant. */
-extern ntfschar I30[5];
-
-extern MFT_REF ntfs_lookup_inode_by_name(ntfs_inode *dir_ni,
-		const ntfschar *uname, const int uname_len, ntfs_name **res);
+#define mark_actor_exceed_root(actor,vol)	(actor->pos = vol->mft_record_size)
+/*
+ * loff_t inline offset_actor_exceed_root(const struct dir_context* actor,const ntfs_volume* vol)
+ */
+#define offset_actor_exceed_root(actor,vol) (actor->pos - vol->mft_record_size) 
 
 #endif /* _LINUX_NTFS_FS_DIR_H */

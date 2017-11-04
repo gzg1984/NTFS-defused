@@ -40,6 +40,7 @@
 #include "malloc.h"
 #include "mft.h"
 #include "ntfs.h"
+#include "aops.h"
 
 /**
  * ntfs_file_open - called when an inode is about to be opened
@@ -106,7 +107,7 @@ static int ntfs_file_open(struct inode *vi, struct file *filp)
  * Locking: i_mutex on the vfs inode corrseponsind to the ntfs inode @ni must be
  *	    held by the caller.
  */
-static int ntfs_attr_extend_initialized(ntfs_inode *ni, const s64 new_init_size)
+int ntfs_attr_extend_initialized(ntfs_inode *ni, const s64 new_init_size)
 {
 	s64 old_init_size;
 	loff_t old_i_size;
@@ -490,64 +491,6 @@ out:
 	return err;
 }
 
-/**
- * __ntfs_grab_cache_pages - obtain a number of locked pages
- * @mapping:	address space mapping from which to obtain page cache pages
- * @index:	starting index in @mapping at which to begin obtaining pages
- * @nr_pages:	number of page cache pages to obtain
- * @pages:	array of pages in which to return the obtained page cache pages
- * @cached_page: allocated but as yet unused page
- *
- * Obtain @nr_pages locked page cache pages from the mapping @mapping and
- * starting at index @index.
- *
- * If a page is newly created, add it to lru list
- *
- * Note, the page locks are obtained in ascending page index order.
- */
-int __ntfs_grab_cache_pages(struct address_space *mapping,
-		pgoff_t index, const unsigned nr_pages, struct page **pages,
-		struct page **cached_page)
-{
-	int err, nr;
-
-	BUG_ON(!nr_pages);
-	err = nr = 0;
-	do {
-		pages[nr] = find_get_page_flags(mapping, index, FGP_LOCK |
-				FGP_ACCESSED);
-		if (!pages[nr]) {
-			if (!*cached_page) {
-				*cached_page = page_cache_alloc(mapping);
-				if (unlikely(!*cached_page)) {
-					err = -ENOMEM;
-					goto err_out;
-				}
-			}
-			err = add_to_page_cache_lru(*cached_page, mapping,
-				   index,
-				   mapping_gfp_constraint(mapping, GFP_KERNEL));
-			if (unlikely(err)) {
-				if (err == -EEXIST)
-					continue;
-				goto err_out;
-			}
-			pages[nr] = *cached_page;
-			*cached_page = NULL;
-		}
-		index++;
-		nr++;
-	} while (nr < nr_pages);
-out:
-	return err;
-err_out:
-	while (nr > 0) {
-		unlock_page(pages[--nr]);
-		put_page(pages[nr]);
-	}
-	goto out;
-}
-
 static inline int ntfs_submit_bh_for_read(struct buffer_head *bh)
 {
 	lock_buffer(bh);
@@ -849,7 +792,9 @@ retry_remap:
 			/* Seek to element containing target cluster. */
 			while (rl->length && rl[1].vcn <= bh_cpos)
 				rl++;
+			ntfs_debug("lcn is [%d] before ntfs_rl_vcn_to_lcn",lcn);
 			lcn = ntfs_rl_vcn_to_lcn(rl, bh_cpos);
+			ntfs_debug("lcn is [%d] after ntfs_rl_vcn_to_lcn",lcn);
 			if (likely(lcn >= 0)) {
 				/*
 				 * Successful remap, setup the map cache and
@@ -969,6 +914,7 @@ rl_not_mapped_enoent:
 		 * Out of bounds buffer is invalid if it was not really out of
 		 * bounds.
 		 */
+		ntfs_debug("lcn is [%d] should BE [%d]",lcn,LCN_HOLE);
 		BUG_ON(lcn != LCN_HOLE);
 		/*
 		 * We need the runlist locked for writing, so if it is locked
@@ -1736,12 +1682,12 @@ err:
 }
 
 /**
- * ntfs_perform_write - perform buffered write to a file
+ * ntfs_file_data_write - perform buffered write to a file
  * @file:	file to write to
  * @i:		iov_iter with data to write
  * @pos:	byte offset in file at which to begin writing to
  */
-static ssize_t ntfs_perform_write(struct file *file, struct iov_iter *i,
+static ssize_t ntfs_file_data_write(struct file *file, struct iov_iter *i,
 		loff_t pos)
 {
 	struct address_space *mapping = file->f_mapping;
@@ -1787,7 +1733,7 @@ static ssize_t ntfs_perform_write(struct file *file, struct iov_iter *i,
 	 */
 	nr_pages = 1;
 	if (vol->cluster_size > PAGE_SIZE && NInoNonResident(ni))
-		nr_pages = vol->cluster_size >> PAGE_SHIFT;
+		nr_pages = ntfs_pages_count_in_cluster(vol);
 	last_vcn = -1;
 	do {
 		VCN vcn;
@@ -1933,7 +1879,7 @@ again:
  * @from:	iov_iter with data to write
  *
  * Basically the same as generic_file_write_iter() except that it ends up
- * up calling ntfs_perform_write() instead of generic_perform_write() and that
+ * up calling ntfs_file_data_write() instead of generic_perform_write() and that
  * O_DIRECT is not implemented.
  */
 static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
@@ -1948,7 +1894,7 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	current->backing_dev_info = inode_to_bdi(vi);
 	err = ntfs_prepare_file_for_write(iocb, from);
 	if (iov_iter_count(from) && !err)
-		written = ntfs_perform_write(file, from, iocb->ki_pos);
+		written = ntfs_file_data_write(file, from, iocb->ki_pos);
 	current->backing_dev_info = NULL;
 	inode_unlock(vi);
 	iocb->ki_pos += written;

@@ -25,12 +25,19 @@
 
 #include <linux/fs.h>
 
+#include "ntfs.h"
 #include "types.h"
 #include "layout.h"
-#include "inode.h"
+//#include "inode.h"
 #include "attrib.h"
 #include "mft.h"
 #include "aops.h"
+
+#define  VCN_INDEX_ROOT_PARENT  ((VCN)-2)
+#define  MAX_PARENT_VCN         32
+extern MFT_REF ntfs_lookup_inode_by_name(ntfs_inode *dir_ni,
+		const ntfschar *uname, const int uname_len, ntfs_name **res);
+
 
 /**
  * @idx_ni:	index inode containing the @entry described by this context
@@ -83,17 +90,25 @@ typedef struct {
 	ntfs_inode *base_ni;
 	INDEX_ALLOCATION *ia;
 	struct page *page;
+	/***/
+	int parent_pos[MAX_PARENT_VCN];  /* parent entries' positions */
+	VCN parent_vcn[MAX_PARENT_VCN]; /* entry's parent nodes */
+	int pindex;          /* maximum it's the number of the parent nodes  */
+	/***/
 } ntfs_index_context;
 
 extern ntfs_index_context *ntfs_index_ctx_get(ntfs_inode *idx_ni);
 extern void ntfs_index_ctx_put(ntfs_index_context *ictx);
 
-extern int ntfs_lookup_inode_by_key (const void *key, const int key_len, ntfs_index_context *ictx);
+extern int ntfs_lookup_inode_by_index_entry (const INDEX_ENTRY *ie, ntfs_index_context *ictx);
+extern int ntfs_lookup_inode_by_filename (const FILE_NAME_ATTR *filename, ntfs_index_context *ictx);
 extern int ntfs_index_lookup(const void *key, const int key_len,
 		ntfs_index_context *ictx);
+extern int ntfs_search_attr_index_root( /* input & output */ntfs_attr_search_ctx *temp_search_ctx);
 
-extern int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen);
 #ifdef NTFS_RW
+extern int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen);
+extern int ntfs_split_current_index_allocation(ntfs_index_context *icx);
 
 /**
  * ntfs_index_entry_flush_dcache_page - flush_dcache_page() for index entries
@@ -147,19 +162,46 @@ static inline void ntfs_index_entry_mark_dirty(ntfs_index_context *ictx)
 
 //extern int ntfs_ie_add(ntfs_index_context *icx, INDEX_ENTRY *ie);
 extern int ntfs_ie_add(ntfs_inode *idx_ni, INDEX_ENTRY *ie);
+extern VCN ntfs_ibm_get_free(ntfs_index_context *icx);
+
+extern int ntfs_directory_context_write(ntfs_index_context *icx);
+extern int ntfs_directory_data_write(ntfs_index_context *icx, INDEX_BLOCK *ib);
+
+extern ssize_t ntfs_prepare_directory_for_write(ntfs_index_context *icx, INDEX_BLOCK *ib);
+extern int ntfs_icx_parent_inc(ntfs_index_context *icx);
+extern INDEX_ENTRY *ntfs_ie_dup(INDEX_ENTRY *ie);
+extern int ntfs_ie_add_vcn(INDEX_ENTRY **ie);
+extern void ntfs_ie_set_vcn(INDEX_ENTRY *ie, VCN vcn);
+extern INDEX_ENTRY *ntfs_ie_get_by_pos(INDEX_HEADER *ih, int pos);
+extern void ntfs_ie_insert(INDEX_HEADER *ih, INDEX_ENTRY *ie, INDEX_ENTRY *pos); 
+extern VCN ntfs_ie_get_vcn(INDEX_ENTRY *ie);
+extern int ntfs_ir_make_space(ntfs_index_context *icx, int data_size);
+
+void ntfs_dump_index_entry(INDEX_ENTRY* ie);
+
+
+
+
+
 
 #endif /* NTFS_RW */
+/**
+ ** The little endian Unicode string $I30 as a global constant.
+ **/
+extern ntfschar I30[5];
+
 
 /* INDEX_HEADER *ih
  */
-#define ntfs_ie_get_first(ih) ((INDEX_ENTRY*)((u8*)ih + le32_to_cpu((ih)->entries_offset)))
-#define ntfs_ie_get_end(ih) ((u8*)ih + le32_to_cpu((ih)->index_length))
+#define ntfs_ie_get_first(ih) ((INDEX_ENTRY*)(((u8*)(ih)) + le32_to_cpu((ih)->entries_offset)))
+#define ntfs_ie_get_end(ih) (((u8*)(ih)) + le32_to_cpu((ih)->index_length))
 #define ntfs_ih_one_entry(ih) (ntfs_ih_numof_entries(ih) == 1)
 
 /* INDEX_ENTRY *ie
  */
-#define ntfs_ie_end(ie) (ie->flags & INDEX_ENTRY_END || !ie->length)
-#define ntfs_ie_get_next(ie) ((INDEX_ENTRY*)((char *)ie + le16_to_cpu(ie->length)))
+#define ntfs_ie_end(ie) ((ie)->flags & INDEX_ENTRY_END || !(ie)->length)
+#define ntfs_ie_get_next(ie) ((INDEX_ENTRY*)((char *)(ie) + le16_to_cpu((ie)->length)))
+#define ntfs_ie_get_subnode_pos(ie) (sle64_to_cpup((sle64*)((u8*)(ie) + le16_to_cpu((ie)->length) - 8)))
 
 /* ntfs_index_context *icx
  * s64 pos

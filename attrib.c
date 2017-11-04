@@ -1444,7 +1444,11 @@ int ntfs_attr_record_resize(MFT_RECORD *m, ATTR_RECORD *a, u32 new_size)
 				le32_to_cpu(a->length) + new_size;
 		/* Not enough space in this mft record. */
 		if (new_muse > le32_to_cpu(m->bytes_allocated))
+		{
+			ntfs_debug("Not enough space in the MFT record "
+					       "(%u > %u)\n", new_muse, m->bytes_allocated);
 			return -ENOSPC;
+		}
 		/* Move attributes following @a to their new location. */
 		memmove((u8*)a + new_size, (u8*)a + le32_to_cpu(a->length),
 				le32_to_cpu(m->bytes_in_use) - ((u8*)a -

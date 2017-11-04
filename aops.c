@@ -40,6 +40,81 @@
 #include "types.h"
 #include "ntfs.h"
 
+
+int ntfs_grab_one_cache_page(struct address_space *mapping,pgoff_t index,
+		struct page **pages)
+{
+	struct page *cached_page = NULL;
+	int status = 0 ;
+	/* Get and lock @do_pages starting at index @start_idx. */
+	status = __ntfs_grab_cache_pages(mapping, index, 1,
+			pages, &cached_page);
+	if (unlikely(status))
+	{
+		ntfs_error(mapping->host->i_sb,"Grab One Page Failed with cacahed_page %p",
+				cached_page);
+		if (cached_page)
+			put_page(cached_page);
+	}
+	return status;
+}
+/**
+ * __ntfs_grab_cache_pages - obtain a number of locked pages
+ * @mapping:	address space mapping from which to obtain page cache pages
+ * @index:	starting index in @mapping at which to begin obtaining pages
+ * @nr_pages:	number of page cache pages to obtain
+ * @pages:	array of pages in which to return the obtained page cache pages
+ * @cached_page: allocated but as yet unused page
+ *
+ * Obtain @nr_pages locked page cache pages from the mapping @mapping and
+ * starting at index @index.
+ *
+ * If a page is newly created, add it to lru list
+ *
+ * Note, the page locks are obtained in ascending page index order.
+ */
+int __ntfs_grab_cache_pages(struct address_space *mapping,
+		pgoff_t index, const unsigned nr_pages, struct page **pages,
+		struct page **cached_page)
+{
+	int err, nr;
+
+	BUG_ON(!nr_pages);
+	err = nr = 0;
+	do {
+		pages[nr] = find_get_page_flags(mapping, index, FGP_LOCK |
+				FGP_ACCESSED);
+		if (!pages[nr]) {
+			if (!*cached_page) {
+				*cached_page = page_cache_alloc(mapping);
+				if (unlikely(!*cached_page)) {
+					err = -ENOMEM;
+					goto err_out;
+				}
+			}
+			err = add_to_page_cache_lru(*cached_page, mapping,
+				   index,
+				   mapping_gfp_constraint(mapping, GFP_KERNEL));
+			if (unlikely(err)) {
+				if (err == -EEXIST)
+					continue;
+				goto err_out;
+			}
+			pages[nr] = *cached_page;
+			*cached_page = NULL;
+		}
+		index++;
+		nr++;
+	} while (nr < nr_pages);
+out:
+	return err;
+err_out:
+	while (nr > 0) {
+		unlock_page(pages[--nr]);
+		put_page(pages[nr]);
+	}
+	goto out;
+}
 /**
  * ntfs_end_buffer_async_read - async io completion for reading attributes
  * @bh:		buffer head on which io is completed

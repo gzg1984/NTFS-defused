@@ -101,14 +101,19 @@ static inline struct page *ntfs_map_page(struct address_space *mapping,
 int __ntfs_grab_cache_pages(struct address_space *mapping,
 		                pgoff_t index, const unsigned nr_pages, struct page **pages,
 				                struct page **cached_page);
+int ntfs_grab_one_cache_page(struct address_space *mapping,pgoff_t index,
+		                struct page **pages);
+
+
 int ntfs_prepare_pages_for_non_resident_write(struct page **pages,
 		                unsigned nr_pages, s64 pos, size_t bytes);
 void ntfs_flush_dcache_pages(struct page **pages,
 		                unsigned nr_pages);
 int ntfs_commit_pages_after_write(struct page **pages,
 		                const unsigned nr_pages, s64 pos, size_t bytes);
+int ntfs_attr_extend_initialized(ntfs_inode *ni, const s64 new_init_size);
 
-
+#define ntfs_pages_count_in_cluster(vol) ((vol)->cluster_size >> PAGE_SHIFT)
 
 
 #ifdef NTFS_RW

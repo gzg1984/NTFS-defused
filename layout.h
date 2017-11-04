@@ -300,8 +300,6 @@ typedef le16 MFT_RECORD_FLAGS;
 #define MFT_REF_MASK_CPU 0x0000ffffffffffffULL
 #define MFT_REF_MASK_LE cpu_to_le64(MFT_REF_MASK_CPU)
 
-typedef u64 MFT_REF;
-typedef le64 leMFT_REF;
 
 #define MK_MREF(m, s)	((MFT_REF)(((MFT_REF)(s) << 48) |		\
 					((MFT_REF)(m) & MFT_REF_MASK_CPU)))
@@ -1036,8 +1034,6 @@ enum {
 	/* 3 means that both the Win32 and the DOS filenames are identical and
 	   hence have been saved in this single filename record. */
 } __attribute__ ((__packed__));
-
-typedef u8 FILE_NAME_TYPE_FLAGS;
 
 /*
  * Attribute: Filename (0x30).
@@ -2431,5 +2427,8 @@ typedef struct {
 	/* EFS uses it as follows: */
 	// FIXME: Type this info, verifying it along the way. (AIA)
 } __attribute__ ((__packed__)) LOGGED_UTILITY_STREAM, EFS_ATTR;
+
+
+
 
 #endif /* _LINUX_NTFS_LAYOUT_H */

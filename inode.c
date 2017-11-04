@@ -35,6 +35,7 @@
 #include "dir.h"
 #include "debug.h"
 #include "inode.h"
+#include "index.h"
 #include "lcnalloc.h"
 #include "malloc.h"
 #include "mft.h"
@@ -83,6 +84,16 @@ int ntfs_test_inode(struct inode *vi, ntfs_attr *na)
 	return 1;
 }
 
+struct inode *ntfs_bitmap_vfs_inode_lookup(struct inode* vi)
+{
+	ntfs_attr na;
+	/* If the bitmap attribute inode is in memory sync it, too. */
+	na.mft_no = vi->i_ino;
+	na.type = AT_BITMAP;
+	na.name = I30;
+	na.name_len = 4;
+	return ilookup5(vi->i_sb, vi->i_ino, (test_t)ntfs_test_inode, &na);
+}
 /**
  * ntfs_init_locked_inode - initialize an inode
  * @vi:		vfs inode to initialize
@@ -144,8 +155,55 @@ static int ntfs_init_locked_inode(struct inode *vi, ntfs_attr *na)
 	}
 	return 0;
 }
-
 typedef int (*set_t)(struct inode *, void *);
+/**
+ * ntfs_get_attribute_inode - obtain a struct inode corresponding to an attribute
+ * @base_vi:	vfs base inode containing the attribute
+ * @type:	attribute type
+ * @name:	Unicode name of the attribute (NULL if unnamed)
+ * @name_len:	length of @name in Unicode characters (0 if unnamed)
+ *
+ * Obtain the (fake) struct inode corresponding to the attribute specified by
+ * @type, @name, and @name_len, which is present in the base mft record
+ * specified by the vfs inode @base_vi.
+ *
+ * If the attribute inode is in the cache, it is just returned with an
+ * increased reference count. Otherwise, a new struct inode is allocated and
+ * initialized, and finally ntfs_read_locked_attr_inode() is called to read the
+ * attribute and fill in the inode structure.
+ *
+ * Note, for index allocation attributes, you need to use ntfs_index_iget()
+ * instead of ntfs_attr_iget() as working with indices is a lot more complex.
+ *
+ * Return the struct inode of the attribute inode on success. Check the return
+ * value with IS_ERR() and if true, the function failed and the error code is
+ * obtained from PTR_ERR().
+ */
+static struct inode *ntfs_get_attribute_inode(struct inode *base_vi, ATTR_TYPE type,
+		ntfschar *name, u32 name_len)
+{
+	ntfs_attr na={
+		.mft_no=base_vi->i_ino,
+		.type = type,
+		.name = name,
+		.name_len = name_len,
+	};
+	return iget5_locked(base_vi->i_sb, na.mft_no, (test_t)ntfs_test_inode,
+			(set_t)ntfs_init_locked_inode, &na);
+}
+static struct inode *ntfs_get_base_inode(struct super_block *sb,
+	       	unsigned long mft_no)
+{
+	ntfs_attr na={
+		.mft_no=mft_no,
+		.type = AT_UNUSED,
+		.name = NULL,
+		.name_len = 0,
+	};
+	return iget5_locked(sb, na.mft_no, (test_t)ntfs_test_inode,
+			(set_t)ntfs_init_locked_inode, &na);
+}
+
 static int ntfs_read_locked_inode(struct inode *vi);
 static int ntfs_read_locked_attr_inode(struct inode *base_vi, struct inode *vi);
 static int ntfs_read_locked_index_inode(struct inode *base_vi,
@@ -169,17 +227,8 @@ static int ntfs_read_locked_index_inode(struct inode *base_vi,
  */
 struct inode *ntfs_iget(struct super_block *sb, unsigned long mft_no)
 {
-	struct inode *vi;
 	int err;
-	ntfs_attr na;
-
-	na.mft_no = mft_no;
-	na.type = AT_UNUSED;
-	na.name = NULL;
-	na.name_len = 0;
-
-	vi = iget5_locked(sb, mft_no, (test_t)ntfs_test_inode,
-			(set_t)ntfs_init_locked_inode, &na);
+	struct inode *vi = ntfs_get_base_inode(sb, mft_no);
 	if (unlikely(!vi))
 		return ERR_PTR(-ENOMEM);
 
@@ -201,61 +250,168 @@ struct inode *ntfs_iget(struct super_block *sb, unsigned long mft_no)
 	return vi;
 }
 
-/**
- * ntfs_attr_iget - obtain a struct inode corresponding to an attribute
- * @base_vi:	vfs base inode containing the attribute
- * @type:	attribute type
- * @name:	Unicode name of the attribute (NULL if unnamed)
- * @name_len:	length of @name in Unicode characters (0 if unnamed)
- *
- * Obtain the (fake) struct inode corresponding to the attribute specified by
- * @type, @name, and @name_len, which is present in the base mft record
- * specified by the vfs inode @base_vi.
- *
- * If the attribute inode is in the cache, it is just returned with an
- * increased reference count. Otherwise, a new struct inode is allocated and
- * initialized, and finally ntfs_read_locked_attr_inode() is called to read the
- * attribute and fill in the inode structure.
- *
- * Note, for index allocation attributes, you need to use ntfs_index_iget()
- * instead of ntfs_attr_iget() as working with indices is a lot more complex.
- *
- * Return the struct inode of the attribute inode on success. Check the return
- * value with IS_ERR() and if true, the function failed and the error code is
- * obtained from PTR_ERR().
- */
+inline struct inode *ntfs_bitmap_vfs_inode_get(struct inode *base_vi)
+{
+	return ntfs_attr_iget(base_vi, AT_BITMAP, I30, 4);
+}
+inline bool is_bit_set_in_page(u8* bmp,int offset_in_bitmap_page)
+{
+	return (bmp[offset_in_bitmap_page >> 3] & (1 << (offset_in_bitmap_page & 7)));
+}
+#define BLOCK_POS_PAGE_MASK ((PAGE_SIZE << 3) - 1)
+int get_available_pos_in_index_allocation_since_pos(struct inode *vdir, s64* p_ia_pos)
+{
+	u8 *bmp ;
+	s64 index_block_pos;
+	int  offset_in_bitmap_page;
+	struct inode *bmp_vi;
+	struct address_space *bmp_mapping;
+	struct page *bmp_page = NULL;
+	loff_t i_size = 0;
+	struct super_block *sb = vdir->i_sb;
+	ntfs_inode *ndir = NTFS_I(vdir);
+	ntfs_volume *vol = NTFS_SB(sb);
+
+	ntfs_debug("Inode 0x%lx, getting index bitmap.", vdir->i_ino);
+
+	i_size = i_size_read(vdir);
+	bmp_vi = ntfs_bitmap_vfs_inode_get(vdir);
+	if (IS_ERR(bmp_vi)) {
+		ntfs_error(sb, "Failed to get bitmap attribute.");
+		return PTR_ERR(bmp_vi);
+	}
+	bmp_mapping = bmp_vi->i_mapping;
+
+	/* Get the starting bitmap bit position and sanity check it. */
+	index_block_pos = pos_byte_to_block(*p_ia_pos,NTFS_I(vdir));
+
+	if (unlikely(index_block_pos >> 3 >= i_size_read(bmp_vi))) {
+		ntfs_error(sb, "Current index allocation position [%ld][%ld] exceeds "
+				"index bitmap size[%ld].",
+				index_block_pos >> 3,index_block_pos,i_size_read(bmp_vi));
+		iput(bmp_vi);
+		return -EIO;
+	}
+	/* Get the starting bit position in the current bitmap page. */
+	offset_in_bitmap_page = index_block_pos & BLOCK_POS_PAGE_MASK;
+	index_block_pos &= ~(u64)BLOCK_POS_PAGE_MASK;
+get_next_bmp_page:
+	ntfs_debug("Reading bitmap with page index 0x%llx, bit ofs 0x%llx",
+			(unsigned long long)index_block_pos >> (3 + PAGE_SHIFT),
+			(unsigned long long)index_block_pos &
+			(unsigned long long)((PAGE_SIZE * 8) - 1));
+	bmp_page = ntfs_map_page(bmp_mapping,
+			index_block_pos >> (3 + PAGE_SHIFT));
+	if (IS_ERR(bmp_page)) {
+		ntfs_error(sb, "Reading index bitmap failed.");
+		bmp_page = NULL;
+		return  PTR_ERR(bmp_page);
+	}
+	bmp = (u8*)page_address(bmp_page);
+	/* Find next index block in use. */
+	while (!is_bit_set_in_page(bmp,offset_in_bitmap_page)) {
+		offset_in_bitmap_page++;
+		/*
+		 * If we have reached the end of the bitmap page, 
+		 * put away the old one page, 
+		 * and get the next one 
+		 */
+		if (unlikely((offset_in_bitmap_page >> 3) >= PAGE_SIZE)) {
+			ntfs_unmap_page(bmp_page);
+			index_block_pos += PAGE_SIZE * 8;
+			offset_in_bitmap_page = 0;
+			goto get_next_bmp_page;
+		}
+		/* If we have reached the end of the bitmap, we are done. */
+		if (unlikely(((index_block_pos + offset_in_bitmap_page) >> 3) >= i_size))
+		{
+			*p_ia_pos = i_size + vol->mft_record_size;
+			goto out;
+		}
+		else
+		{
+			/* not sure this ia_pos is available,
+			 * weill check the bitmap in 
+			 * next while trun
+			 */
+			*p_ia_pos = (index_block_pos + offset_in_bitmap_page) <<
+					ndir->itype.index.block_size_bits;
+		}
+	}
+	ntfs_debug("Handling index buffer 0x%llx.",
+			(unsigned long long)index_block_pos + offset_in_bitmap_page);
+out:
+	ntfs_unmap_page(bmp_page);
+	iput(bmp_vi);
+	return 0;
+}
+
+int ntfs_index_walk_entry_in_header(void *dir,INDEX_HEADER* ih,
+		loff_t* p_skip_pos,
+		ie_looper func,void* parameter)
+{
+	u8 *index_end = NULL ;
+	INDEX_ENTRY *ie = NULL;
+	int rc = 0 ;
+
+	index_end = (u8*)ih + le32_to_cpu(ih->index_length);
+	/* The first index entry. */
+	ie = (INDEX_ENTRY*)((u8*)ih +
+			le32_to_cpu(ih->entries_offset));
+	BUG_ON(!p_skip_pos);
+
+	/*
+	 * Loop until we exceed valid memory (corruption case) or until we
+	 * reach the last entry or until filldir tells us it has had enough
+	 * or signals an error (both covered by the rc test).
+	 */
+	for (;; ie = (INDEX_ENTRY*)((u8*)ie + le16_to_cpu(ie->length))) {
+		ntfs_debug("In Index Header, offset 0x%zx.", (u8*)ie - (u8*)ih);
+		/* Bounds checks. */
+		if (unlikely((u8*)ie < (u8*)ih || (u8*)ie +
+				sizeof(INDEX_ENTRY_HEADER) > index_end ||
+				(u8*)ie + le16_to_cpu(ie->key_length) >
+				index_end))
+			return -EIO;
+		/* The last entry cannot contain a name. */
+		if (ie->flags & INDEX_ENTRY_END)
+			break;
+		/* Skip index root entry if continuing previous readdir. */
+		if ((*p_skip_pos) > (u8*)ie - (u8*)ih)
+			continue;
+		/* Advance the position even if going to skip the entry. */
+		(*p_skip_pos) = (u8*)ie - (u8*)ih;
+		/* Submit the name to the filldir callback. */
+		rc = func(dir, ie, parameter);
+		if (rc) {
+			return rc;
+		}
+	}
+	return 0 ;
+}
+/* Export;
+ * Read before return 
+ * */
 struct inode *ntfs_attr_iget(struct inode *base_vi, ATTR_TYPE type,
 		ntfschar *name, u32 name_len)
 {
-	struct inode *vi;
-	int err;
-	ntfs_attr na;
-
-	na.mft_no = base_vi->i_ino;
-	na.type = type;
-	na.name = name;
-	na.name_len = name_len;
-
-	vi = iget5_locked(base_vi->i_sb, na.mft_no, (test_t)ntfs_test_inode,
-			(set_t)ntfs_init_locked_inode, &na);
+	struct inode *vi = ntfs_get_attribute_inode(base_vi, type, name,name_len);
 	if (unlikely(!vi))
 		return ERR_PTR(-ENOMEM);
 
-	err = 0;
-
 	/* If this is a freshly allocated inode, need to read it now. */
 	if (vi->i_state & I_NEW) {
-		err = ntfs_read_locked_attr_inode(base_vi, vi);
+		int err = ntfs_read_locked_attr_inode(base_vi, vi);
 		unlock_new_inode(vi);
-	}
-	/*
-	 * There is no point in keeping bad attribute inodes around. This also
-	 * simplifies things in that we never need to check for bad attribute
-	 * inodes elsewhere.
-	 */
-	if (unlikely(err)) {
-		iput(vi);
-		vi = ERR_PTR(err);
+		/*
+		 * There is no point in keeping bad attribute inodes around. This also
+		 * simplifies things in that we never need to check for bad attribute
+		 * inodes elsewhere.
+		 */
+		if (unlikely(err)) {
+			iput(vi);
+			vi = ERR_PTR(err);
+		}
 	}
 	return vi;
 }
@@ -282,7 +438,25 @@ struct inode *ntfs_attr_iget(struct inode *base_vi, ATTR_TYPE type,
 struct inode *ntfs_index_iget(struct inode *base_vi, ntfschar *name,
 		u32 name_len)
 {
-	return ntfs_attr_iget(base_vi, AT_INDEX_ALLOCATION, name, name_len);
+	struct inode *vi = ntfs_get_attribute_inode(base_vi, AT_INDEX_ALLOCATION, name,name_len);
+	if (unlikely(!vi))
+		return ERR_PTR(-ENOMEM);
+
+	/* If this is a freshly allocated inode, need to read it now. */
+	if (vi->i_state & I_NEW) {
+		int err = ntfs_read_locked_index_inode(base_vi, vi);
+		unlock_new_inode(vi);
+		/*
+		 * There is no point in keeping bad attribute inodes around. This also
+		 * simplifies things in that we never need to check for bad attribute
+		 * inodes elsewhere.
+		 */
+		if (unlikely(err)) {
+			iput(vi);
+			vi = ERR_PTR(err);
+		}
+	}
+	return vi;
 }
 
 struct inode *ntfs_alloc_big_inode(struct super_block *sb)
@@ -758,8 +932,7 @@ skip_attr_list_load:
 
 		/* It is a directory, find index root attribute. */
 		ntfs_attr_reinit_search_ctx(ctx);
-		err = ntfs_attr_lookup(AT_INDEX_ROOT, I30, 4, CASE_SENSITIVE,
-				0, NULL, 0, ctx);
+		err = ntfs_search_attr_index_root(ctx);
 		if (unlikely(err)) {
 			if (err == -ENOENT) {
 				// FIXME: File is corrupt! Hot-fix with empty
@@ -2304,6 +2477,82 @@ int ntfs_show_options(struct seq_file *sf, struct dentry *root)
 	return 0;
 }
 
+#define block_alignment(pos,ndir) ((pos) & ~(s64)(ndir->itype.index.block_size - 1))
+int ntfs_transfer_ia_pos_to_address(struct inode* vdir,u8* paget_map_kaddr,s64 ia_pos,
+			INDEX_ALLOCATION** p_index_allocation,s64* p_ia_start,u8** index_header_end)
+{
+	ntfs_inode *ndir = NTFS_I(vdir);
+	struct super_block *sb = vdir->i_sb;
+	INDEX_ALLOCATION *ia;
+
+	(*p_index_allocation) = (INDEX_ALLOCATION*)(paget_map_kaddr + block_alignment(offset_in_page(ia_pos),ndir));
+	ia=(*p_index_allocation);
+
+	/* Bounds checks. */
+	if (unlikely((u8*)ia < paget_map_kaddr 
+		|| (u8*)ia > (paget_map_kaddr + PAGE_SIZE) )) 
+	{
+		ntfs_error(sb, "Out of bounds check failed. Corrupt directory "
+				"inode 0x%lx or driver bug.", vdir->i_ino);
+		return -EIO;
+	}
+	/* Catch multi sector transfer fixup errors. */
+	if (unlikely(!ntfs_is_indx_record(ia->magic))) 
+	{
+		ntfs_error(sb, "Directory index record with vcn 0x%llx is "
+				"corrupt.  Corrupt inode 0x%lx.  Run chkdsk.",
+				(unsigned long long)ia_pos >>
+				ndir->itype.index.vcn_size_bits, vdir->i_ino);
+		return -EIO;
+	}
+	if (unlikely(sle64_to_cpu(ia->index_block_vcn) != 
+		block_alignment(ia_pos,ndir) >> ndir->itype.index.vcn_size_bits)) 
+	{
+		ntfs_error(sb, "Actual VCN (0x%llx) of index buffer is "
+				"different from expected VCN (0x%llx). "
+				"Directory inode 0x%lx is corrupt or driver "
+				"bug. ", (unsigned long long)
+				sle64_to_cpu(ia->index_block_vcn),
+				(unsigned long long)ia_pos >> ndir->itype.index.vcn_size_bits, 
+				vdir->i_ino);
+		return -EIO;
+	}
+	if (unlikely(le32_to_cpu(ia->index.allocated_size) + 0x18 !=
+			ndir->itype.index.block_size)) {
+		ntfs_error(sb, "Index buffer (VCN 0x%llx) of directory inode "
+				"0x%lx has a size (%u) differing from the "
+				"directory specified size (%u). Directory "
+				"inode is corrupt or driver bug.",
+				(unsigned long long)ia_pos >> ndir->itype.index.vcn_size_bits, 
+				vdir->i_ino,
+				le32_to_cpu(ia->index.allocated_size) + 0x18,
+				ndir->itype.index.block_size);
+		return -EIO;
+	}
+
+	(*index_header_end) = (u8*)ia + ndir->itype.index.block_size;
+	if (unlikely( (*index_header_end) > (paget_map_kaddr + PAGE_SIZE)) ) {
+		ntfs_error(sb, "Index buffer (VCN 0x%llx) of directory inode "
+				"0x%lx crosses page boundary. Impossible! "
+				"Cannot access! This is probably a bug in the "
+				"driver.", 
+				(unsigned long long)ia_pos >> ndir->itype.index.vcn_size_bits, 
+				vdir->i_ino);
+		return -EIO;
+	}
+
+	(*p_ia_start)= block_alignment(ia_pos, ndir);
+
+	(*index_header_end) = ntfs_ie_get_end(&ia->index);
+	if (unlikely( (*index_header_end) > (u8*)ia + ndir->itype.index.block_size)) {
+		ntfs_error(sb, "Size of index buffer (VCN 0x%llx) of directory "
+				"inode 0x%lx exceeds maximum size.",
+				(unsigned long long)ia_pos >>
+				ndir->itype.index.vcn_size_bits, vdir->i_ino);
+		return -EIO;
+	}
+	return 0;
+}
 #ifdef NTFS_RW
 
 static const char *es = "  Leaving inconsistent metadata.  Unmount and run "
@@ -2834,11 +3083,9 @@ conv_err_out:
  *
  * See ntfs_truncate() description above for details.
  */
-#ifdef NTFS_RW
 void ntfs_truncate_vfs(struct inode *vi) {
 	ntfs_truncate(vi);
 }
-#endif
 
 /**
  * ntfs_setattr - called from notify_change() when an attribute is being changed

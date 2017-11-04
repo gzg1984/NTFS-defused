@@ -408,7 +408,7 @@ static int ntfs_write_volume_flags(ntfs_volume *vol, const VOLUME_FLAGS flags)
 	unmap_mft_record(ni);
 done:
 	ntfs_debug("Done.");
-	return 0;
+	return STATUS_OK;
 put_unm_err_out:
 	if (ctx)
 		ntfs_attr_put_search_ctx(ctx);
@@ -565,7 +565,7 @@ static int ntfs_remount(struct super_block *sb, int *flags, char *opt)
 		return -EINVAL;
 
 	ntfs_debug("Done.");
-	return 0;
+	return STATUS_OK;
 }
 
 /**
@@ -1296,7 +1296,7 @@ static int check_windows_hibernation_status(ntfs_volume *vol)
 		if (ret == -ENOENT) {
 			ntfs_debug("hiberfil.sys not present.  Windows is not "
 					"hibernated.");
-			return 0;
+			return STATUS_OK;
 		}
 		/* A real error occurred. */
 		ntfs_error(vol->sb, "Failed to find inode number for "
@@ -1347,66 +1347,75 @@ iput_out:
  * Return 'true' on success or 'false' on error.  If $Quota is not present, we
  * leave vol->quota_ino as NULL and return success.
  */
-static bool load_and_init_quota(ntfs_volume *vol)
+static int load_and_init_quota_queue(ntfs_volume *vol)
 {
-	MFT_REF mref;
+	static ntfschar Q[3] = { cpu_to_le16('$'),
+			cpu_to_le16('Q'), 0 };
+
+	vol->quota_q_ino = ntfs_index_iget(vol->quota_ino, Q, 2);
+	if (IS_ERR(vol->quota_q_ino)) 
+	{
+		vol->quota_q_ino=NULL;
+		ntfs_error(vol->sb, "Failed to load $Quota/$Q index.");
+		return -EIO;
+	}
+	else
+	{
+		return STATUS_OK;
+	}
+}
+static int load_and_init_quota(ntfs_volume *vol)
+{
+	int rc;
 	struct inode *tmp_ino;
-	ntfs_name *name = NULL;
 	static const ntfschar Quota[7] = { cpu_to_le16('$'),
 			cpu_to_le16('Q'), cpu_to_le16('u'),
 			cpu_to_le16('o'), cpu_to_le16('t'),
 			cpu_to_le16('a'), 0 };
-	static ntfschar Q[3] = { cpu_to_le16('$'),
-			cpu_to_le16('Q'), 0 };
-
 	ntfs_debug("Entering.");
-	/*
-	 * Find the inode number for the quota file by looking up the filename
-	 * $Quota in the extended system files directory $Extend.
-	 */
-	inode_lock(vol->extend_ino);
-	mref = ntfs_lookup_inode_by_name(NTFS_I(vol->extend_ino), Quota, 6,
-			&name);
-	inode_unlock(vol->extend_ino);
-	if (IS_ERR_MREF(mref)) {
+	tmp_ino = ntfs_vfs_inode_lookup_by_name(vol,NTFS_I(vol->extend_ino), Quota, 6);
+	if (IS_ERR(tmp_ino)) 
+	{
 		/*
 		 * If the file does not exist, quotas are disabled and have
 		 * never been enabled on this volume, just return success.
 		 */
-		if (MREF_ERR(mref) == -ENOENT) {
+		if(-ENOENT == PTR_ERR(tmp_ino) )
+		{
 			ntfs_debug("$Quota not present.  Volume does not have "
 					"quotas enabled.");
 			/*
-			 * No need to try to set quotas out of date if they are
-			 * not enabled.
-			 */
+			 ** No need to try to set quotas out of date if they are
+			 ** not enabled.
+			 **/
 			NVolSetQuotaOutOfDate(vol);
-			return true;
 		}
-		/* A real error occurred. */
-		ntfs_error(vol->sb, "Failed to find inode number for $Quota.");
-		return false;
-	}
-	/* We do not care for the type of match that was found. */
-	kfree(name);
-	/* Get the inode. */
-	tmp_ino = ntfs_iget(vol->sb, MREF(mref));
-	if (IS_ERR(tmp_ino) || is_bad_inode(tmp_ino)) {
-		if (!IS_ERR(tmp_ino))
-			iput(tmp_ino);
+		else if( -EIO == PTR_ERR(tmp_ino) )
+		{
+			/* A real error occurred. */
+			ntfs_error(vol->sb, "Failed to find inode number for $Quota.");
+		}
 		ntfs_error(vol->sb, "Failed to load $Quota.");
-		return false;
+		return PTR_ERR(tmp_ino);
 	}
-	vol->quota_ino = tmp_ino;
+	else
+	{
+		/* Accept and go on */
+		vol->quota_ino = tmp_ino;
+	}
+
 	/* Get the $Q index allocation attribute. */
-	tmp_ino = ntfs_index_iget(vol->quota_ino, Q, 2);
-	if (IS_ERR(tmp_ino)) {
-		ntfs_error(vol->sb, "Failed to load $Quota/$Q index.");
-		return false;
+	rc = load_and_init_quota_queue(vol);
+	if( rc )
+	{
+		ntfs_debug("Fail.");
+		return rc;
 	}
-	vol->quota_q_ino = tmp_ino;
-	ntfs_debug("Done.");
-	return true;
+	else
+	{
+		ntfs_debug("Done.");
+		return STATUS_OK;
+	}
 }
 
 /**
@@ -2103,7 +2112,7 @@ get_ctx_vol_failed:
 	}
 #ifdef NTFS_RW
 	/* Find the quota file, load it if present, and set it up. */
-	if (!load_and_init_quota(vol)) {
+	if (load_and_init_quota(vol)) {
 		static const char *es1 = "Failed to load $Quota";
 		static const char *es2 = ".  Run chkdsk.";
 
