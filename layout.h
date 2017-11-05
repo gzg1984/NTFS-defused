@@ -2429,6 +2429,15 @@ typedef struct {
 } __attribute__ ((__packed__)) LOGGED_UTILITY_STREAM, EFS_ATTR;
 
 
+#define SHOULD_CONTINUE 2
+#define SHOULD_CHECK_SUBNODE 1
+#define PERFECT_MATCH 0
+/* void* get_current_attribute(ntfs_attr_search_ctx *temp_search_ctx) */
+#define get_current_attribute(temp_search_ctx)  ((u8*)(temp_search_ctx)->attr + le16_to_cpu((temp_search_ctx)->attr->data.resident.value_offset))
+/* INDEX_ENTRY* ntfs_index_root_get_first_entry(INDEX_ROOT* ir) */
+#define ntfs_index_root_get_first_entry(ir) (ntfs_ie_get_first(&((ir)->index)))
+/* u8* ntfs_index_root_get_end_position(INDEX_ROOT* ir) */
+#define ntfs_index_root_get_end_position(ir) ( ntfs_ie_get_end(&((ir)->index)))
 
 
 #endif /* _LINUX_NTFS_LAYOUT_H */

@@ -1267,12 +1267,7 @@ enum {
  */
 static int check_windows_hibernation_status(ntfs_volume *vol)
 {
-	MFT_REF mref;
 	struct inode *vi;
-	struct page *page;
-	u32 *kaddr;
-	ntfs_name *name = NULL;
-	int ret = 1;
 	static const ntfschar hiberfil[13] = { cpu_to_le16('h'),
 			cpu_to_le16('i'), cpu_to_le16('b'),
 			cpu_to_le16('e'), cpu_to_le16('r'),
@@ -1286,58 +1281,56 @@ static int check_windows_hibernation_status(ntfs_volume *vol)
 	 * Find the inode number for the hibernation file by looking up the
 	 * filename hiberfil.sys in the root directory.
 	 */
-	inode_lock(vol->root_ino);
-	mref = ntfs_lookup_inode_by_name(NTFS_I(vol->root_ino), hiberfil, 12,
-			&name);
-	inode_unlock(vol->root_ino);
-	if (IS_ERR_MREF(mref)) {
-		ret = MREF_ERR(mref);
-		/* If the file does not exist, Windows is not hibernated. */
-		if (ret == -ENOENT) {
+	vi = ntfs_vfs_inode_lookup_by_name(vol,NTFS_I(vol->root_ino), hiberfil, 12);
+	if (IS_ERR(vi))
+	{
+		if(-ENOENT == PTR_ERR(vi) )
+		{
 			ntfs_debug("hiberfil.sys not present.  Windows is not "
 					"hibernated.");
 			return STATUS_OK;
+
 		}
-		/* A real error occurred. */
-		ntfs_error(vol->sb, "Failed to find inode number for "
-				"hiberfil.sys.");
+		else 
+		{
+			/* A real error occurred. */
+			ntfs_error(vol->sb, "Failed to find inode number for "
+					"hiberfil.sys.");
+			return PTR_ERR(vi);
+		}
+	}
+	else
+	{
+		struct page *page;
+		u32 *kaddr;
+		int ret = 1;
+		/* Accept and go on */
+		if (unlikely(i_size_read(vi) < NTFS_HIBERFIL_HEADER_SIZE)) {
+			ntfs_debug("hiberfil.sys is smaller than 4kiB (0x%llx).  "
+					"Windows is hibernated.", i_size_read(vi));
+			goto iput_out;
+		}
+		page = ntfs_map_page(vi->i_mapping, 0);
+		if (IS_ERR(page)) {
+			ntfs_error(vol->sb, "Failed to read from hiberfil.sys.");
+			ret = PTR_ERR(page);
+			goto iput_out;
+		}
+		kaddr = (u32*)page_address(page);
+		if (*(le32*)kaddr == magic_hibr || *(le32*)kaddr == magic_HIBR) {
+			ntfs_debug("Magic \"%s\" found in hiberfil.sys.  Windows is "
+					"hibernated.", (*(le32*)kaddr == magic_HIBR) ?
+					"HIBR" : "hibr");
+			goto unm_iput_out;
+		}
+		ntfs_debug("Windows is not hibernated.");
+		ret = 0;
+unm_iput_out:
+		ntfs_unmap_page(page);
+iput_out:
+		iput(vi);
 		return ret;
 	}
-	/* We do not care for the type of match that was found. */
-	kfree(name);
-	/* Get the inode. */
-	vi = ntfs_iget(vol->sb, MREF(mref));
-	if (IS_ERR(vi) || is_bad_inode(vi)) {
-		if (!IS_ERR(vi))
-			iput(vi);
-		ntfs_error(vol->sb, "Failed to load hiberfil.sys.");
-		return IS_ERR(vi) ? PTR_ERR(vi) : -EIO;
-	}
-	if (unlikely(i_size_read(vi) < NTFS_HIBERFIL_HEADER_SIZE)) {
-		ntfs_debug("hiberfil.sys is smaller than 4kiB (0x%llx).  "
-				"Windows is hibernated.", i_size_read(vi));
-		goto iput_out;
-	}
-	page = ntfs_map_page(vi->i_mapping, 0);
-	if (IS_ERR(page)) {
-		ntfs_error(vol->sb, "Failed to read from hiberfil.sys.");
-		ret = PTR_ERR(page);
-		goto iput_out;
-	}
-	kaddr = (u32*)page_address(page);
-	if (*(le32*)kaddr == magic_hibr || *(le32*)kaddr == magic_HIBR) {
-		ntfs_debug("Magic \"%s\" found in hiberfil.sys.  Windows is "
-				"hibernated.", (*(le32*)kaddr == magic_HIBR) ?
-				"HIBR" : "hibr");
-		goto unm_iput_out;
-	}
-	ntfs_debug("Windows is not hibernated.");
-	ret = 0;
-unm_iput_out:
-	ntfs_unmap_page(page);
-iput_out:
-	iput(vi);
-	return ret;
 }
 
 /**
@@ -1434,11 +1427,9 @@ static int load_and_init_quota(ntfs_volume *vol)
  */
 static bool load_and_init_usnjrnl(ntfs_volume *vol)
 {
-	MFT_REF mref;
 	struct inode *tmp_ino;
 	ntfs_inode *tmp_ni;
 	struct page *page;
-	ntfs_name *name = NULL;
 	USN_HEADER *uh;
 	static const ntfschar UsnJrnl[9] = { cpu_to_le16('$'),
 			cpu_to_le16('U'), cpu_to_le16('s'),
@@ -1456,16 +1447,15 @@ static bool load_and_init_usnjrnl(ntfs_volume *vol)
 	 * Find the inode number for the transaction log file by looking up the
 	 * filename $UsnJrnl in the extended system files directory $Extend.
 	 */
-	inode_lock(vol->extend_ino);
-	mref = ntfs_lookup_inode_by_name(NTFS_I(vol->extend_ino), UsnJrnl, 8,
-			&name);
-	inode_unlock(vol->extend_ino);
-	if (IS_ERR_MREF(mref)) {
+	tmp_ino = ntfs_vfs_inode_lookup_by_name(vol,NTFS_I(vol->extend_ino), UsnJrnl, 8);
+	if (IS_ERR(tmp_ino))
+	{
 		/*
 		 * If the file does not exist, transaction logging is disabled,
 		 * just return success.
 		 */
-		if (MREF_ERR(mref) == -ENOENT) {
+		if(-ENOENT == PTR_ERR(tmp_ino) )
+		{
 			ntfs_debug("$UsnJrnl not present.  Volume does not "
 					"have transaction logging enabled.");
 not_enabled:
@@ -1476,22 +1466,20 @@ not_enabled:
 			NVolSetUsnJrnlStamped(vol);
 			return true;
 		}
-		/* A real error occurred. */
-		ntfs_error(vol->sb, "Failed to find inode number for "
-				"$UsnJrnl.");
-		return false;
+		else
+		{
+			/* A real error occurred. */
+			ntfs_error(vol->sb, "Failed to find inode number for "
+					"$UsnJrnl.");
+			return false;
+		}
 	}
-	/* We do not care for the type of match that was found. */
-	kfree(name);
-	/* Get the inode. */
-	tmp_ino = ntfs_iget(vol->sb, MREF(mref));
-	if (unlikely(IS_ERR(tmp_ino) || is_bad_inode(tmp_ino))) {
-		if (!IS_ERR(tmp_ino))
-			iput(tmp_ino);
-		ntfs_error(vol->sb, "Failed to load $UsnJrnl.");
-		return false;
+	else
+	{
+		/* Accept and go on */
+		vol->usnjrnl_ino = tmp_ino;
 	}
-	vol->usnjrnl_ino = tmp_ino;
+
 	/*
 	 * If the transaction log is in the process of being deleted, we can
 	 * ignore it.

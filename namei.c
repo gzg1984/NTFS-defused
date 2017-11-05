@@ -742,8 +742,24 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	new_mft_record->link_count = cpu_to_le16(1);
 	/** MUST set this **/
 	new_mft_record->bytes_in_use = new_temp_offset;
+			if(in_atomic_preempt_off())
+			{
+				ntfs_debug("in_atomic_preempt_off is off before flush_dcache_mft_record_page ");
+			}
+			else
+			{
+				ntfs_debug("in_atomic_preempt_off is on before flush_dcache_mft_record_page");
+		       	}
 	flush_dcache_mft_record_page(new_ntfs_inode);
+			if(in_atomic_preempt_off())
+			{
+				ntfs_debug("in_atomic_preempt_off is off before mark_mft_record_dirty ");
+			}
 	mark_mft_record_dirty(new_ntfs_inode);
+			if(in_atomic_preempt_off())
+			{
+				ntfs_debug("in_atomic_preempt_off is off before unmap_mft_record ");
+			}
 	unmap_mft_record(new_ntfs_inode);
 
 	(VFS_I(new_ntfs_inode))->i_op = &ntfs_file_inode_ops;
@@ -759,6 +775,14 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	}
 
 	(VFS_I(new_ntfs_inode))->i_blocks = new_ntfs_inode->allocated_size >> 9;
+			if(in_atomic_preempt_off())
+			{
+				ntfs_debug("in_atomic_preempt_off is off before return ");
+			}
+			else
+			{
+				ntfs_debug("in_atomic_preempt_off is on before return");
+		       	}
 
 
 	ntfs_debug("Done.");

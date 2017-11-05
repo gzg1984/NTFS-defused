@@ -28,7 +28,6 @@
 #include "ntfs.h"
 #include "types.h"
 #include "layout.h"
-//#include "inode.h"
 #include "attrib.h"
 #include "mft.h"
 #include "aops.h"
@@ -80,6 +79,7 @@ extern MFT_REF ntfs_lookup_inode_by_name(ntfs_inode *dir_ni,
  * ensure that the changes are written to disk.
  */
 typedef struct {
+	/* For insert popurse */
 	ntfs_inode *idx_ni;
 	INDEX_ENTRY *entry;
 	void *data;
@@ -90,23 +90,34 @@ typedef struct {
 	ntfs_inode *base_ni;
 	INDEX_ALLOCATION *ia;
 	struct page *page;
-	/***/
+	/* For perfect B tree split*/
 	int parent_pos[MAX_PARENT_VCN];  /* parent entries' positions */
 	VCN parent_vcn[MAX_PARENT_VCN]; /* entry's parent nodes */
 	int pindex;          /* maximum it's the number of the parent nodes  */
-	/***/
+	/* For lookup popurse 
+	 * imperfect match name */
+	ntfs_name* imperfect_match_name;
 } ntfs_index_context;
 
 extern ntfs_index_context *ntfs_index_ctx_get(ntfs_inode *idx_ni);
 extern void ntfs_index_ctx_put(ntfs_index_context *ictx);
-
+extern int _ntfs_ir_lookup_by_name(
+		const ntfschar* uname,
+		const int uname_len, 
+		/* input */ ntfs_attr_search_ctx* temp_search_ctx,
+		/* output */ INDEX_ENTRY** pie,
+		/* output */ ntfs_index_context *ictx);
 extern int ntfs_lookup_inode_by_index_entry (const INDEX_ENTRY *ie, ntfs_index_context *ictx);
 extern int ntfs_lookup_inode_by_filename (const FILE_NAME_ATTR *filename, ntfs_index_context *ictx);
 extern int ntfs_index_lookup(const void *key, const int key_len,
 		ntfs_index_context *ictx);
 extern int ntfs_search_attr_index_root( /* input & output */ntfs_attr_search_ctx *temp_search_ctx);
 
+extern int _ntfs_index_lookup (const ntfschar* uname,const int uname_len,
+		                /* output */ ntfs_index_context *ictx);
+
 #ifdef NTFS_RW
+
 extern int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen);
 extern int ntfs_split_current_index_allocation(ntfs_index_context *icx);
 
@@ -211,8 +222,13 @@ extern ntfschar I30[5];
  * VCN vcn
  * */
 #define ntfs_ib_vcn_to_pos(icx,vcn) ( vcn << icx->idx_ni->itype.index.vcn_size_bits)
+/* size_t ntfs_vcn_to_pos(VCN vcn,ntfs_inode* ni) */
+#define ntfs_vcn_to_pos(vcn,ni) ((vcn) << (ni)->itype.index.vcn_size_bits)
 
 #define STATUS_OK	(0)
 #define STATUS_ERROR	(-1)
+
+extern void set_index_context_with_result(ntfs_index_context* ictx,INDEX_ENTRY* ie);
+
 
 #endif /* _LINUX_NTFS_INDEX_H */
