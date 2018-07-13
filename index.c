@@ -601,7 +601,6 @@ MFT_REF _ntfs_lookup_inode_by_name(ntfs_inode *dir_ni, const ntfschar *uname,
 	m = NULL;
 	temp_search_ctx = NULL;
 descend_into_child_node:
-	ntfs_debug("descend_into_child_node vcn %d\n",vcn);
 	/*
 	 * Convert vcn to index into the index allocation attribute in units
 	 * of PAGE_SIZE and map the page cache page, reading it from
@@ -618,7 +617,6 @@ descend_into_child_node:
 	lock_page(page);
 	kaddr = (u8*)page_address(page);
 fast_descend_into_child_node:
-	ntfs_debug("fast_descend_into_child_node vcn %d\n",vcn);
 	/* Get to the index allocation block. */
 	ia = (INDEX_ALLOCATION*)(kaddr + 
 			offset_in_page(vcn << dir_ni->itype.index.vcn_size_bits) );

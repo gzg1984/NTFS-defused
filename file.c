@@ -24,7 +24,13 @@
 #include <linux/gfp.h>
 #include <linux/pagemap.h>
 #include <linux/pagevec.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 #include <linux/sched/signal.h>
+#else
+#include <linux/signal.h>
+#endif
+
 #include <linux/swap.h>
 #include <linux/uio.h>
 #include <linux/writeback.h>
@@ -496,7 +502,13 @@ static inline int ntfs_submit_bh_for_read(struct buffer_head *bh)
 	lock_buffer(bh);
 	get_bh(bh);
 	bh->b_end_io = end_buffer_read_sync;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 	return submit_bh(REQ_OP_READ, 0, bh);
+#else
+	return submit_bh(READ, bh);
+
+#endif
+
 }
 
 /**
@@ -683,7 +695,12 @@ map_buffer_cached:
 					set_buffer_uptodate(bh);
 				if (unlikely(was_hole)) {
 					/* We allocated the buffer. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 					clean_bdev_bh_alias(bh);
+#else
+					unmap_underlying_metadata(bh->b_bdev,
+							bh->b_blocknr);
+#endif
 					if (bh_end <= pos || bh_pos >= end)
 						mark_buffer_dirty(bh);
 					else
@@ -726,7 +743,12 @@ map_buffer_cached:
 				continue;
 			}
 			/* We allocated the buffer. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 			clean_bdev_bh_alias(bh);
+#else
+			unmap_underlying_metadata(bh->b_bdev, bh->b_blocknr);
+#endif
+
 			/*
 			 * If the buffer is fully outside the write, zero it,
 			 * set it uptodate, and mark it dirty so it gets
@@ -792,9 +814,7 @@ retry_remap:
 			/* Seek to element containing target cluster. */
 			while (rl->length && rl[1].vcn <= bh_cpos)
 				rl++;
-			ntfs_debug("lcn is [%d] before ntfs_rl_vcn_to_lcn",lcn);
 			lcn = ntfs_rl_vcn_to_lcn(rl, bh_cpos);
-			ntfs_debug("lcn is [%d] after ntfs_rl_vcn_to_lcn",lcn);
 			if (likely(lcn >= 0)) {
 				/*
 				 * Successful remap, setup the map cache and
@@ -914,7 +934,6 @@ rl_not_mapped_enoent:
 		 * Out of bounds buffer is invalid if it was not really out of
 		 * bounds.
 		 */
-		ntfs_debug("lcn is [%d] should BE [%d]",lcn,LCN_HOLE);
 		BUG_ON(lcn != LCN_HOLE);
 		/*
 		 * We need the runlist locked for writing, so if it is locked
@@ -1896,10 +1915,20 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (iov_iter_count(from) && !err)
 		written = ntfs_file_data_write(file, from, iocb->ki_pos);
 	current->backing_dev_info = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 	inode_unlock(vi);
 	iocb->ki_pos += written;
 	if (likely(written > 0))
 		written = generic_write_sync(iocb, written);
+#else
+        mutex_unlock(&vi->i_mutex);
+        if (likely(written > 0)) {
+                err = generic_write_sync(file, iocb->ki_pos, written);
+                if (err < 0)
+                        written = 0;
+        }
+        iocb->ki_pos += written;
+#endif
 	return written ? written : err;
 }
 

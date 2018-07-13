@@ -257,6 +257,7 @@ still_busy:
  *
  * Contains an adapted version of fs/buffer.c::block_read_full_page().
  */
+#include <linux/version.h>
 static int ntfs_read_block(struct page *page)
 {
 	loff_t i_size;
@@ -438,7 +439,11 @@ handle_zblock:
 		for (i = 0; i < nr; i++) {
 			tbh = arr[i];
 			if (likely(!buffer_uptodate(tbh)))
-				submit_bh(REQ_OP_READ, 0, tbh);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
+                                submit_bh(REQ_OP_READ, 0, tbh);
+#else
+                                submit_bh(READ, tbh);
+#endif
 			else
 				ntfs_end_buffer_async_read(tbh, 1);
 		}
@@ -953,7 +958,11 @@ lock_retry_remap:
 	do {
 		struct buffer_head *next = bh->b_this_page;
 		if (buffer_async_write(bh)) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
 			submit_bh(REQ_OP_WRITE, 0, bh);
+#else
+			submit_bh(WRITE, bh);
+#endif
 			need_end_writeback = false;
 		}
 		bh = next;
@@ -1278,7 +1287,11 @@ lock_retry_remap:
 		BUG_ON(!buffer_mapped(tbh));
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_write_sync;
-		submit_bh(REQ_OP_WRITE, 0, tbh);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
+                                submit_bh(REQ_OP_WRITE, 0, tbh);
+#else
+                                submit_bh(READ, tbh);
+#endif
 	}
 	/* Synchronize the mft mirror now if not @sync. */
 	if (is_mft && !sync)

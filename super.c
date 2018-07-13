@@ -3068,6 +3068,7 @@ static const char ntfs_name_cache_name[] = "ntfs_name_cache";
 static const char ntfs_inode_cache_name[] = "ntfs_inode_cache";
 static const char ntfs_big_inode_cache_name[] = "ntfs_big_inode_cache";
 
+#include <linux/version.h>
 static int __init init_ntfs_fs(void)
 {
 	int err = 0;
@@ -3123,8 +3124,11 @@ static int __init init_ntfs_fs(void)
 
 	ntfs_big_inode_cache = kmem_cache_create(ntfs_big_inode_cache_name,
 			sizeof(big_ntfs_inode), 0,
-			SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD|
-			SLAB_ACCOUNT, ntfs_big_inode_init_once);
+			SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
+			| SLAB_ACCOUNT
+#endif 
+			,ntfs_big_inode_init_once);
 	if (!ntfs_big_inode_cache) {
 		pr_crit("Failed to create %s!\n", ntfs_big_inode_cache_name);
 		goto big_inode_err_out;
