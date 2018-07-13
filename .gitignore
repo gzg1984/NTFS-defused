@@ -1,5 +1,8 @@
+*.mod.c
 *.o
 *.ko
 *~
 .*
 tags
+Module.symvers
+modules.order
