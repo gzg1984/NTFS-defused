@@ -135,6 +135,8 @@ out:
  *	       removes them again after the write is complete after which it 
  *	       unlocks the page.
  */
+extern int index_root_iterate(struct inode *vdir,loff_t* p_skip_pos,
+		                ie_looper func,void* parameter);
 static int ntfs_dir_iterate(struct file *file, struct dir_context *actor)
 {
 	s64 ia_pos, ia_start, prev_ia_pos;
@@ -144,7 +146,6 @@ static int ntfs_dir_iterate(struct file *file, struct dir_context *actor)
 	struct super_block *sb = vdir->i_sb;
 	ntfs_inode *ndir = NTFS_I(vdir);
 	ntfs_volume *vol = NTFS_SB(sb);
-	INDEX_ROOT *ir = NULL;
 	INDEX_ALLOCATION *ia;
 	int rc, err;
 	struct address_space *ia_mapping;
@@ -170,21 +171,9 @@ static int ntfs_dir_iterate(struct file *file, struct dir_context *actor)
 	/* Are we jumping straight into the index allocation attribute? */
 	if (!is_actor_exceed_root(actor,vol))
 	{
-		ntfs_debug("Index Root Phase");
-		rc = ntfs_inode_copy_ir(ndir,&ir); /* alloc ir **/
-		if(rc)
-		{
-			err =  rc ;
-			goto err_out;
-		}
-		/* Get the offset into the index root attribute. */
-		ntfs_debug("Starting Handling Index Root");
-		rc = ntfs_index_walk_entry_in_header(vdir,&(ir->index),
-				&(actor->pos),
-				ntfs_loop_filldir,actor);
-		kfree(ir);
-		ir = NULL; /* release ir */
-
+		rc = index_root_iterate(vdir,
+			&(actor->pos),
+			ntfs_loop_filldir,actor);
 		if ( 1 ==  rc )
 		{
 			goto abort;

@@ -123,6 +123,19 @@ struct _ntfs_inode {
 						   real (base) inode to which
 						   the attribute belongs. */
 	} ext;
+
+	/* For Index Root, 
+	 * every dir only have one Index Root
+	 * as resident attr,
+	 * So we can keep a snapshot as static content 
+	 * in ntfs_inode.
+	 * for quick access
+	 * Then, if we didn't modify this folder 
+	 * no need to copy it from MFT again
+	 * */
+	struct mutex ir_lock;	/* Lock for Index Root */
+	INDEX_ROOT* ir_snapshot;
+	size_t ir_snapshot_length;
 };
 
 /*
@@ -243,6 +256,4 @@ extern void ntfs_clear_extent_inode(ntfs_inode *ni);
 
 struct inode* ntfs_vfs_inode_lookup_by_name(ntfs_volume *vol,ntfs_inode *dir_ni, 
 		                const ntfschar *uname, const int uname_len);
-extern int ntfs_inode_copy_ir(ntfs_inode* dir_ntfs_inode,/* output */INDEX_ROOT** pir);
-
 #endif /* _NTFS_INODE_H_ */
