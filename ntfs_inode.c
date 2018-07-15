@@ -49,11 +49,11 @@ struct inode* ntfs_vfs_inode_lookup_by_name(ntfs_volume *vol,ntfs_inode *dir_ni,
 	{
 		if (MREF_ERR(mref) == -ENOENT) 
 		{
-			return -ENOENT;
+			return ERR_PTR(-ENOENT);
 		}
 		else
 		{
-			return -EIO;
+			return ERR_PTR(-EIO);
 		}
 	}
 	/* We do not care for the type of match that was found. */
@@ -63,8 +63,8 @@ struct inode* ntfs_vfs_inode_lookup_by_name(ntfs_volume *vol,ntfs_inode *dir_ni,
 	if (IS_ERR(tmp_ino) || is_bad_inode(tmp_ino)) {
 		if (!IS_ERR(tmp_ino))
 			iput(tmp_ino);
-		ntfs_error(vol->sb, "Failed to load mref %d.",mref);
-		return -EIO;
+		ntfs_error(vol->sb, "Failed to load mref %llu.",mref);
+		return ERR_PTR(-EIO);
 	}
 	return tmp_ino;
 }
