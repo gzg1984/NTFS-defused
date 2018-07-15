@@ -3032,7 +3032,8 @@ struct kmem_cache *ntfs_big_inode_cache;
 static void ntfs_big_inode_init_once(void *foo)
 {
 	ntfs_inode *ni = (ntfs_inode *)foo;
-
+	ni->ir_snapshot = NULL;
+	ni->ir_snapshot_length = 0;
 	inode_init_once(VFS_I(ni));
 }
 
