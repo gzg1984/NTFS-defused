@@ -1433,6 +1433,7 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(ntfs_volume *vol)
 		goto undo_alloc;
 	}
 	a = ctx->attr;
+	debug_show_attr(a);
 	ll = sle64_to_cpu(a->data.non_resident.lowest_vcn);
 	/* Search back for the previous last allocated cluster of mft bitmap. */
 	for (rl2 = rl; rl2 > mftbmp_ni->runlist.rl; rl2--) {

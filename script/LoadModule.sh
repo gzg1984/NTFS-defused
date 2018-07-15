@@ -20,6 +20,7 @@ fi
 if [ -f ../ntfs.ko ]
 then
 	insmod ../ntfs.ko
+	echo 1 > /proc/sys/fs/ntfs-debug
 else
 	file ../ntfs.ko
 	exit 0
@@ -27,6 +28,5 @@ fi
 
 mkdir -p /run/temp
 mount -t ntfs-gordon ntfs.img /run/temp -o loop
-echo 1 > /proc/sys/fs/ntfs-debug
 
 exit 0

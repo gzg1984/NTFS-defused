@@ -2,44 +2,6 @@
 #include "ntfs.h"
 #include "inode.h"
 #include "index.h"
-static char* attr_type_string(ATTR_TYPE type)
-{
-	switch(type)
-	{
-		case AT_UNUSED:
-			return "AT_UNUSED";
-		case AT_STANDARD_INFORMATION:
-			return "AT_STANDARD_INFORMATION";
-		case AT_INDEX_ROOT:
-			return "AT_INDEX_ROOT";
-		case AT_INDEX_ALLOCATION:
-			return "AT_INDEX_ALLOCATION";
-		case AT_ATTRIBUTE_LIST:
-			return "AT_ATTRIBUTE_LIST";
-		case AT_FILE_NAME:
-			return "AT_FILE_NAME";
-		case AT_DATA:
-			return "AT_DATA";
-		default:
-			return "Unknown";
-	}
-	return ":)";
-	/*
-					AT_OBJECT_ID                    = cpu_to_le32(      0x40),
-					AT_SECURITY_DESCRIPTOR          = cpu_to_le32(      0x50),
-					AT_VOLUME_NAME                  = cpu_to_le32(      0x60),
-					AT_VOLUME_INFORMATION           = cpu_to_le32(      0x70),
-					AT_BITMAP                       = cpu_to_le32(      0xb0),
-					AT_REPARSE_POINT                = cpu_to_le32(      0xc0),
-					AT_EA_INFORMATION               = cpu_to_le32(      0xd0),
-					AT_EA                           = cpu_to_le32(      0xe0),
-					AT_PROPERTY_SET                 = cpu_to_le32(      0xf0),
-					AT_LOGGED_UTILITY_STREAM        = cpu_to_le32(     0x100),
-					AT_FIRST_USER_DEFINED_ATTRIBUTE = cpu_to_le32(    0x1000),
-					AT_END                          = cpu_to_le32(0xffffffff)
-					*/
-
-}
 static char* collation_rule_string(COLLATION_RULE rule)
 {
 	switch(rule)
@@ -52,21 +14,26 @@ static char* collation_rule_string(COLLATION_RULE rule)
 			return "COLLATION_UNICODE_STRING";
 		case COLLATION_NTOFS_ULONG:
 			return "COLLATION_NTOFS_ULONG";
+		case COLLATION_NTOFS_SID:
+			return "COLLATION_NTOFS_SID";
+		case COLLATION_NTOFS_SECURITY_HASH:
+			return "COLLATION_NTOFS_SECURITY_HASH";
+		case COLLATION_NTOFS_ULONGS:
+			return "COLLATION_NTOFS_ULONGS";
 		default:
-			return ":)";
+			return "Unknown";
 	}
-	return ":)";
-	/*
-	 *COLLATION_NTOFS_SID             = cpu_to_le32(0x11),
-	 *COLLATION_NTOFS_SECURITY_HASH   = cpu_to_le32(0x12),
-	 *COLLATION_NTOFS_ULONGS          = cpu_to_le32(0x13),
-	 */
+	return "Error";
 }
 static void debug_show_ih(const char* const prefix,const INDEX_HEADER* const ih)
 {
 #ifdef DEBUG
-	printk("%sINDEX_HEADER\n",prefix);
-	printk("%s\t[......]\n",prefix);
+	printk("%sINDEX_HEADER:\n",prefix);
+	printk("%s\tOffset to first Index Entry:%d\n",prefix,ih->entries_offset);
+	printk("%s\tTotal size of the Index Entries:%d\n",prefix,ih->index_length);
+	printk("%s\tAllocated size of the Node:%d\n",prefix,ih->allocated_size);
+	printk("%s\tNon-leaf node Flag:%X\n",prefix,ih->flags);
+	/*TODO:show INDEX_HEADER_FLAGS */
 #endif
 }
 static void debug_show_ir(const INDEX_ROOT* const ir)
@@ -77,6 +44,7 @@ static void debug_show_ir(const INDEX_ROOT* const ir)
 	printk("\tCollation Rule:%X[%s]\n",ir->collation_rule,collation_rule_string(ir->collation_rule));
 	printk("\tBytes per Index Record:%d\n",ir->index_block_size);
 	printk("\tClusters per Index Record:%d\n",ir->clusters_per_index_block);
+	printk("\tIndex Node Header:");
 	debug_show_ih("\t",&(ir->index));
 #endif
 }
@@ -166,15 +134,16 @@ int index_root_iterate(struct inode *vdir,loff_t* p_skip_pos,
 {
 	int err;
 	ntfs_inode *ndir = NTFS_I(vdir);
+	ntfs_debug("Start iterating Index Root");
 	err = ntfs_inode_refresh_ir_snapshot(ndir); /* alloc ir **/
 	if(err)
 	{
 		return err;
 	}
 	/* Get the offset into the index root attribute. */
-	ntfs_debug("Starting Handling Index Root");
 	err = ntfs_index_walk_entry_in_header(vdir,&(ndir->ir_snapshot->index),
 			p_skip_pos,
 			func,parameter);
+	ntfs_debug("End iterating Index Root");
 	return err;
 }

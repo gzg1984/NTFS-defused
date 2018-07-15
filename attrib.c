@@ -586,6 +586,7 @@ retry_remap:
  * Warning: Never use @val when looking for attribute types which can be
  *	    non-resident as this most likely will result in a crash!
  */
+
 static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 		const u32 name_len, const IGNORE_CASE_BOOL ic,
 		const u8 *val, const u32 val_len, ntfs_attr_search_ctx *ctx)
@@ -594,6 +595,7 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 	ntfs_volume *vol = ctx->ntfs_ino->vol;
 	ntfschar *upcase = vol->upcase;
 	u32 upcase_len = vol->upcase_len;
+	ntfs_debug("Try Find for [%s]\n",attr_type_string(type));
 
 	/*
 	 * Iterate over attributes in mft record starting at @ctx->attr, or the
@@ -610,6 +612,9 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 				le32_to_cpu(ctx->mrec->bytes_allocated))
 			break;
 		ctx->attr = a;
+		/* If we want to list every attr 
+		 * debug_show_attr(ctx->attr);
+		 */
 		if (unlikely(le32_to_cpu(a->type) > le32_to_cpu(type) ||
 				a->type == AT_END))
 			return -ENOENT;
@@ -868,6 +873,7 @@ static int ntfs_external_attr_find(const ATTR_TYPE type,
 	u32 al_name_len;
 	int err = 0;
 	static const char *es = " Unmount and run chkdsk.";
+	ntfs_debug("Looking for External [%s]\n",attr_type_string(type));
 
 	ni = ctx->ntfs_ino;
 	base_ni = ctx->base_ntfs_ino;
@@ -1191,7 +1197,7 @@ int ntfs_attr_lookup(const ATTR_TYPE type, const ntfschar *name,
 {
 	ntfs_inode *base_ni;
 
-	ntfs_debug("Entering.");
+	ntfs_debug("Looking For [%s] Attr\n",attr_type_string(type));
 	BUG_ON(IS_ERR(ctx->mrec));
 	if (ctx->base_ntfs_ino)
 		base_ni = ctx->base_ntfs_ino;

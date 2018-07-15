@@ -188,6 +188,7 @@ static struct inode *ntfs_get_attribute_inode(struct inode *base_vi, ATTR_TYPE t
 		.name = name,
 		.name_len = name_len,
 	};
+	ntfs_debug("Get VFS INODE in Hash for[%s]\n",attr_type_string(type));
 	return iget5_locked(base_vi->i_sb, na.mft_no, (test_t)ntfs_test_inode,
 			(set_t)ntfs_init_locked_inode, &na);
 }
@@ -286,8 +287,8 @@ int get_available_pos_in_index_allocation_since_pos(struct inode *vdir, s64* p_i
 	index_block_pos = pos_byte_to_block(*p_ia_pos,NTFS_I(vdir));
 
 	if (unlikely(index_block_pos >> 3 >= i_size_read(bmp_vi))) {
-		ntfs_error(sb, "Current index allocation position [%ld][%ld] exceeds "
-				"index bitmap size[%ld].",
+		ntfs_error(sb, "Current index allocation position [%lld][%lld] exceeds "
+				"index bitmap size[%lld].",
 				index_block_pos >> 3,index_block_pos,i_size_read(bmp_vi));
 		iput(bmp_vi);
 		return -EIO;
@@ -395,13 +396,16 @@ int ntfs_index_walk_entry_in_header(void *dir,INDEX_HEADER* ih,
 struct inode *ntfs_attr_iget(struct inode *base_vi, ATTR_TYPE type,
 		ntfschar *name, u32 name_len)
 {
-	struct inode *vi = ntfs_get_attribute_inode(base_vi, type, name,name_len);
+	struct inode *vi = NULL;
+	int err = 0;
+	ntfs_debug("Get INODE for[%s]\n",attr_type_string(type));
+	vi = ntfs_get_attribute_inode(base_vi, type, name,name_len);
 	if (unlikely(!vi))
 		return ERR_PTR(-ENOMEM);
 
 	/* If this is a freshly allocated inode, need to read it now. */
 	if (vi->i_state & I_NEW) {
-		int err = ntfs_read_locked_attr_inode(base_vi, vi);
+		err = ntfs_read_locked_attr_inode(base_vi, vi);
 		unlock_new_inode(vi);
 		/*
 		 * There is no point in keeping bad attribute inodes around. This also
@@ -1408,6 +1412,7 @@ static int ntfs_read_locked_attr_inode(struct inode *base_vi, struct inode *vi)
 	if (unlikely(err))
 		goto unm_err_out;
 	a = ctx->attr;
+	debug_show_attr(a);
 	if (a->flags & (ATTR_COMPRESSION_MASK | ATTR_IS_SPARSE)) {
 		if (a->flags & ATTR_COMPRESSION_MASK) {
 			NInoSetCompressed(ni);
