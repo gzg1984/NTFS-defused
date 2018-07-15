@@ -86,7 +86,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 			goto err_out;
 		}
 	}
-	ntfs_debug("[%s]Before ntfs_map_page 0x%lx.", current->comm, index);
+	ntfs_debug("[%s]Before ntfs_map_page 0x%lx.\n", current->comm, index);
 	/* Read, map, and pin the page. */
 	page = ntfs_map_page(mft_vi->i_mapping, index);
 	if (likely(!IS_ERR(page))) {
@@ -98,7 +98,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 			return page_address(page) + ofs;
 		}
 		ntfs_error(vol->sb, "Mft record 0x%lx is corrupt.  "
-				"Run chkdsk.", ni->mft_no);
+				"Run chkdsk.\n", ni->mft_no);
 		ntfs_unmap_page(page);
 		page = ERR_PTR(-EIO);
 		NVolSetErrors(vol);
@@ -164,7 +164,7 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
 {
 	MFT_RECORD *m;
 
-	ntfs_debug("[%s]Entering for mft_no 0x%lx.", 
+	ntfs_debug("[%s]Entering for mft_no 0x%lx.\n", 
 			current->comm,ni->mft_no);
 
 	/* Make sure the ntfs inode doesn't go away. */
@@ -183,7 +183,7 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
 
 	mutex_unlock(&ni->mrec_lock);
 	atomic_dec(&ni->count);
-	ntfs_error(ni->vol->sb, "Failed with error code %lu.", -PTR_ERR(m));
+	ntfs_error(ni->vol->sb, "Failed with error code %lu.\n", -PTR_ERR(m));
 	return m;
 }
 
