@@ -3171,7 +3171,7 @@ ictx_err_out:
 
 static void __exit exit_ntfs_fs(void)
 {
-	ntfs_debug("Unregistering NTFS driver.");
+	ntfs_debug("Unregistering NTFS driver.\n");
 
 	unregister_filesystem(&ntfs_fs_type);
 

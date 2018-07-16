@@ -32,5 +32,6 @@ modules_install : modules
 
 clean:
 	make -C $(KERNEL_SRC) M=`pwd` clean
+	find . -name "*~"|xargs rm
 
 endif

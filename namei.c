@@ -542,10 +542,10 @@ static void ntfs_create_attr_data( MFT_RECORD* const mrec,
 			}
 		},
 	};
+	debug_show_attr(&attr_data);
 	/** insert DATA into new_file_record **/
 	memcpy(&(new_record[*pnew_offset]),&attr_data, attr_data_len );
 	(*pnew_offset) += attr_data_len ;
-	ntfs_debug("new_temp_offset [%d]",*pnew_offset);
 }
 #define const_cpu_to_le16(x)    ((le16) __constant_cpu_to_le16(x))
 #define const_cpu_to_le32(x)    ((le32) __constant_cpu_to_le32(x))
@@ -808,6 +808,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	{
 		case S_IFREG:
 			ntfs_create_attr_data(new_mft_record,&new_temp_offset);
+			ntfs_debug("new_temp_offset [%d]",new_temp_offset);
 			break;
 		case S_IFDIR:
 			ntfs_create_attr_dir(new_ntfs_inode,dir_ni->vol,new_mft_record,&new_temp_offset);

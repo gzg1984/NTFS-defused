@@ -3203,7 +3203,7 @@ int __ntfs_write_inode(struct inode *vi, int sync)
 	int err = 0;
 	bool modified = false;
 
-	ntfs_debug("Entering for %sinode 0x%lx.", NInoAttr(ni) ? "attr " : "",
+	ntfs_debug("Entering for %sinode 0x%lx.\n", NInoAttr(ni) ? "attr " : "",
 			vi->i_ino);
 	/*
 	 * Dirty attribute inodes are written via their real inodes so just
