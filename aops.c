@@ -1288,9 +1288,9 @@ lock_retry_remap:
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_write_sync;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-                                submit_bh(REQ_OP_WRITE, 0, tbh);
+		submit_bh(REQ_OP_WRITE, 0, tbh);
 #else
-                                submit_bh(READ, tbh);
+		submit_bh(WRITE, tbh);
 #endif
 	}
 	/* Synchronize the mft mirror now if not @sync. */
