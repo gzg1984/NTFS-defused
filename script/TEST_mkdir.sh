@@ -11,6 +11,6 @@ fi
 
 # Test Content
 mkdir /run/temp/a
-dmesg -c >  TEST_inode_operations_lookup.kernel.log
+dmesg -c >  ${0}.kernel.log
 
 ./UnLoadModule.sh

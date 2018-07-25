@@ -1,3 +1,3 @@
 #!/bin/sh
 ./CreateNtfsImage.sh
-./TEST_create.sh
+./TEST_mkdir.sh
