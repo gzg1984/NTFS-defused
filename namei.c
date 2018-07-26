@@ -561,8 +561,8 @@ static void ntfs_create_attr_dir(ntfs_inode *new_dir_ntfs_inode,const ntfs_volum
 	ntfschar NTFS_INDEX_I30[5] = { const_cpu_to_le16('$'), const_cpu_to_le16('I'),
 		const_cpu_to_le16('3'), const_cpu_to_le16('0'),
 		const_cpu_to_le16('\0') };
-	int attr_ir_len= offsetof(ATTR_REC, data) + 
-		((4 * sizeof(ntfschar) + 7) & ~7) + ((ir_len + 7) & ~7);
+	int attr_ir_len= sizeof(ATTR_REC) + 
+		((4/*name length*/ * sizeof(ntfschar) + 7) & ~7) + ((ir_len + 7) & ~7);
 	ATTR_REC attr_index_root;
 
 	/* Create INDEX_ROOT attribute. */
@@ -604,18 +604,27 @@ static void ntfs_create_attr_dir(ntfs_inode *new_dir_ntfs_inode,const ntfs_volum
 				}
 			},
 	};
-	/** insert DATA into new_file_record **/
+	/** insert ATTR into new_file_record **/
+	ntfs_debug("ATTR Header of Index Root:Overwrite offset from [%d] to [%d]", *pnew_offset , (*pnew_offset)+attr_ir_len-1);
 	memcpy(&(new_record[*pnew_offset]),&attr_index_root, attr_ir_len );
 	{
 		int name_start = (*pnew_offset)+ le16_to_cpu(attr_index_root.name_offset);
+		ntfs_debug("Attr Name: Overwrite offset from [%d] to [%d]", name_start , name_start + (sizeof(ntfschar) * 4));
 		memcpy(&(new_record[name_start]), NTFS_INDEX_I30, sizeof(ntfschar) * 4);
 	}
+	ntfs_dump_attr_name("After Copying name",&new_record[attr_start]);
+
 	(*pnew_offset) += attr_ir_len ;
 
 
-	/** insert INDEX ROOT into new_file_attr **/
-	memcpy(&(new_record[attr_start+le16_to_cpu(attr_index_root.data.resident.value_offset)]),&ir, ir_len );
-	(*pnew_offset) += attr_ir_len ;
+	/** insert INDEX ROOT into ATTR value **/
+	{
+		int ir_start=attr_start+le16_to_cpu(attr_index_root.data.resident.value_offset);
+		ntfs_debug("Attr Value:Overwrite offset from [%d] to [%d]", ir_start , ir_start+ir_len-1 );
+		memcpy(&(new_record[ir_start]),&ir, ir_len );
+		(*pnew_offset) += attr_ir_len ;
+		ntfs_dump_attr_name("After Copying INDEX ROOT into ATTR value",&new_record[attr_start]);
+	}
 
 
 	/* Creating First & Last IE */
@@ -630,8 +639,10 @@ static void ntfs_create_attr_dir(ntfs_inode *new_dir_ntfs_inode,const ntfs_volum
 		int ie_start=ir_start+sizeof(INDEX_ROOT);
 
 		/** insert DATA into new_file_record **/
+		ntfs_debug("INDEX_ENTRY Overwrite offset from [%d] to [%d]", ie_start , ie_start+sizeof(ie)-1);
 		memcpy(&(new_record[ie_start]),&ie, sizeof(ie) );
 	}
+	ntfs_dump_attr_name("After Copying IE",&new_record[attr_start]);
 	ntfs_debug("new_temp_offset [%d]",*pnew_offset);
 //	new_dir_ntfs_inode->data_size = size;
 	new_dir_ntfs_inode->allocated_size = (ir_len + 7) & ~7;
@@ -939,11 +950,11 @@ static ntfs_inode *ntfs_create_ntfs_inode(ntfs_inode *dir_ni, ntfschar *name, u8
 			ntfs_error((VFS_I(dir_ni))->i_sb,"Unsupported arguments.");
 			return ERR_PTR(-EOPNOTSUPP);
 		default:
-			ntfs_error((VFS_I(dir_ni))->i_sb,"Invalid arguments.");
+			ntfs_error((VFS_I(dir_ni))->i_sb,"Invalid arguments [%X]. Only support [%X][%X]",
+					type,S_IFREG,S_IFDIR);
 			return ERR_PTR(-EINVAL);
 	}
 }
-
 static int ntfs_create_vfs_inode(struct inode *dir,
 		struct dentry *dent,
 		umode_t mode, 
@@ -985,6 +996,13 @@ static int ntfs_create_vfs_inode(struct inode *dir,
 	}
 
 }
+static int ntfs_mkdir(struct inode *dir,
+		struct dentry *dent,
+		umode_t mode)
+{
+	return ntfs_create_vfs_inode(dir,dent,mode|S_IFDIR,0/*unused*/);
+}
+
 
 /*TODO:
   static int ntfs_index_rm_node(ntfs_index_context *icx)
@@ -1401,9 +1419,12 @@ static int ntfs_unlink_vfs_inode(struct inode *pi,struct dentry *pd)
 /**
  * Inode operations for directories.
  */
+        int (*mkdir) (struct inode *,struct dentry *,umode_t);
+
 const struct inode_operations ntfs_dir_inode_ops = {
 	.lookup	= ntfs_lookup,	/* VFS: Lookup directory. */
 #ifdef NTFS_RW
+	.mkdir = ntfs_mkdir,
 	.create = ntfs_create_vfs_inode, 
 	.unlink = ntfs_unlink_vfs_inode,
 #endif

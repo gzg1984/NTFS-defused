@@ -160,6 +160,22 @@ static inline char* attr_type_string(ATTR_TYPE type)
 					*/
 
 }
+inline static void ntfs_dump_attr_name(const char* prompt,const ATTR_RECORD* a)
+{
+#ifdef DEBUG
+	int i = 0;
+	char temp_name[500];
+	ntfschar* name_start = (char*)a + a->name_offset;
+	snprintf(temp_name,400,"%c ", (char)(name_start[i]));
+	for(i = 1 ; i < a->name_length ; i++ )
+	{                                               
+		snprintf(temp_name,400,"%s%c ",temp_name,(char)(name_start[i]));
+	}                                                                               
+	ntfs_debug("%s:[%s]",prompt, temp_name);
+#endif
+}
+
+
 inline static void debug_show_attr(const ATTR_REC* const attr)
 {
 #ifdef DEBUG
@@ -169,6 +185,8 @@ inline static void debug_show_attr(const ATTR_REC* const attr)
 	printk("\tNon-resident flag:%d[%s]\n",attr->non_resident,attr->non_resident?"non-resident":"resident");
 	printk("\tName length:%d\n",attr->name_length);
 	printk("\tOffset to the Name:%d\n",attr->name_offset);
+	if(attr->name_length)
+		ntfs_dump_attr_name("ATTR name:",attr);
 	printk("\tFlags:%X\n",attr->flags);
 	printk("\tAttribute Id:%d\n",attr->instance);
 	if(!attr->non_resident)

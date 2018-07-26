@@ -732,6 +732,7 @@ static int ntfs_read_locked_inode(struct inode *vi)
 	ctx = ntfs_attr_get_search_ctx(ni, m);
 	if (!ctx) {
 		err = -ENOMEM;
+		ntfs_error(vi->i_sb, "Failed in ntfs_attr_get_search_ctx.");
 		goto unm_err_out;
 	}
 
@@ -802,6 +803,7 @@ static int ntfs_read_locked_inode(struct inode *vi)
 			ntfs_error(vi->i_sb, "$STANDARD_INFORMATION attribute "
 					"is missing.");
 		}
+		ntfs_error(vi->i_sb, "Failed in ntfs_attr_lookup for AT_STANDARD_INFORMATION. ");
 		goto unm_err_out;
 	}
 	a = ctx->attr;
@@ -945,6 +947,7 @@ skip_attr_list_load:
 				ntfs_error(vi->i_sb, "$INDEX_ROOT attribute "
 						"is missing.");
 			}
+			ntfs_error(vi->i_sb, "Failed in ntfs_search_attr_index_root (error %i) ", -err);
 			goto unm_err_out;
 		}
 		a = ctx->attr;
@@ -1328,8 +1331,10 @@ no_data_attr_special_case:
 	ntfs_debug("Done.");
 	return 0;
 iput_unm_err_out:
+	ntfs_error(vi->i_sb, "Failed and entery iput routine (error %i) ", -err);
 	iput(bvi);
 unm_err_out:
+	ntfs_error(vi->i_sb, "Failed and entery unmap routine (error %i) ", -err);
 	if (!err)
 		err = -EIO;
 	if (ctx)
@@ -1584,6 +1589,7 @@ static int ntfs_read_locked_attr_inode(struct inode *base_vi, struct inode *vi)
 	return 0;
 
 unm_err_out:
+	ntfs_error(vi->i_sb, "Failed and entery unmap routine (error %i) ", -err);
 	if (!err)
 		err = -EIO;
 	if (ctx)
@@ -1680,6 +1686,7 @@ static int ntfs_read_locked_index_inode(struct inode *base_vi, struct inode *vi)
 		if (err == -ENOENT)
 			ntfs_error(vi->i_sb, "$INDEX_ROOT attribute is "
 					"missing.");
+		ntfs_error(vi->i_sb, "Failed in ntfs_attr_lookup for AT_INDEX_ROOT.");
 		goto unm_err_out;
 	}
 	a = ctx->attr;
@@ -3324,6 +3331,7 @@ int __ntfs_write_inode(struct inode *vi, int sync)
 	ntfs_debug("Done.");
 	return 0;
 unm_err_out:
+	ntfs_error(vi->i_sb, "Failed and entery unmap routine (error %i) ", -err);
 	unmap_mft_record(ni);
 err_out:
 	if (err == -ENOMEM) {

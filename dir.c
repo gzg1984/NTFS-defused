@@ -318,6 +318,7 @@ err_out:
  */
 static int ntfs_dir_open(struct inode *vi, struct file *filp)
 {
+	ntfs_debug("Calling ntfs_dir_open in [%s].", current->comm);
 	if (sizeof(unsigned long) < 8) {
 		if (i_size_read(vi) > MAX_LFS_FILESIZE)
 			return -EFBIG;

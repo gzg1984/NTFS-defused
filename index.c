@@ -2973,7 +2973,7 @@ void ntfs_dump_file_name_attr(const char* prompt,const FILE_NAME_ATTR* filename)
 	snprintf(temp_name,1000," %c ", (char)(filename->file_name[i]));
 	for(i = 1 ; i < filename->file_name_length ; i++ )
 	{
-		snprintf(temp_name,1000,"%s %c ",temp_name,(char)(filename->file_name[i]));
+		snprintf(temp_name,1000,"%s%c",temp_name,(char)(filename->file_name[i]));
 	}
 	ntfs_debug("%s:[%s]",prompt, temp_name);
 #endif
