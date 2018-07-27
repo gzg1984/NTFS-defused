@@ -2,13 +2,14 @@
 ifneq ($(KERNELRELEASE),)
 obj-$(CONFIG_NTFS_FS) += ntfs.o
 
-
 ntfs-y := aops.o attrib.o collate.o compress.o debug.o file.o \
 	  index.o  mst.o namei.o runlist.o super.o sysctl.o \
 	  unistr.o upcase.o mft.o \
-	  inode.o ntfs_inode.o
+	  inode.o ntfs_inode.o 
 # For Folders
 ntfs-y += dir.o index_root.o
+# For compatition
+ntfs-y += compat.o
 
 ntfs-$(CONFIG_NTFS_RW) += bitmap.o lcnalloc.o logfile.o quota.o usnjrnl.o
 

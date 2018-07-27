@@ -475,6 +475,7 @@ static int ntfs_sync_mft_mirror_umount(ntfs_volume *vol,
  * TODO:  If @sync is false, want to do truly asynchronous i/o, i.e. just
  * schedule i/o via ->writepage or do it via kntfsd or whatever.
  */
+#include "compat.h"
 int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 		MFT_RECORD *m, int sync)
 {
@@ -605,11 +606,7 @@ int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 			clear_buffer_dirty(tbh);
 			get_bh(tbh);
 			tbh->b_end_io = end_buffer_write_sync;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-			submit_bh(REQ_OP_WRITE, 0, tbh);
-#else
-			submit_bh(WRITE, tbh);
-#endif
+			ntfs_write_bh(tbh);
 		}
 		/* Wait on i/o completion of buffers. */
 		for (i_bhs = 0; i_bhs < nr_bhs; i_bhs++) {
@@ -802,11 +799,7 @@ int write_mft_record_nolock(ntfs_inode *ni, MFT_RECORD *m, int sync)
 		clear_buffer_dirty(tbh);
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_write_sync;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-		submit_bh(REQ_OP_WRITE, 0, tbh);
-#else
-		submit_bh(WRITE, tbh);
-#endif
+		ntfs_write_bh(tbh);
 	}
 	/* Synchronize the mft mirror now if not @sync. */
 	if (!sync && ni->mft_no < vol->mftmirr_size)

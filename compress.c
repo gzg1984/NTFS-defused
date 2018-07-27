@@ -475,7 +475,7 @@ return_overflow:
  * an error message in read inode if the two sizes are not equal for a
  * compressed file. (AIA)
  */
-#include <linux/version.h>
+#include "compat.h"
 int ntfs_read_compressed_block(struct page *page)
 {
 	loff_t i_size;
@@ -671,12 +671,7 @@ lock_retry_remap:
 		}
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_read_sync;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-		submit_bh(REQ_OP_READ, 0, tbh);
-#else
-		submit_bh(READ, tbh);
-#endif
-
+		ntfs_read_bh(tbh);
 	}
 
 	/* Wait for io completion on all buffer heads. */

@@ -1203,8 +1203,6 @@ err_out:
 		err = -EIO;
 	ntfs_debug("done.");
 	return err;
-dir_err_out:
-	goto err_out;
 }
 MFT_REF ie_mref(INDEX_ENTRY* ie)
 {
@@ -1873,10 +1871,12 @@ idx_err_out:
 }
 
 
+/*
 static s64 ntfs_ibm_vcn_to_pos(ntfs_index_context *icx, VCN vcn)
 {
         return ntfs_ib_vcn_to_pos(icx, vcn) / icx->idx_ni->itype.index.block_size;
 }
+*/
 static s64 ntfs_ibm_pos_to_vcn(ntfs_index_context *icx, s64 pos)
 {
         return ntfs_ib_pos_to_vcn(icx, pos * icx->idx_ni->itype.index.block_size);
@@ -2008,10 +2008,10 @@ int ntfs_directory_context_write(ntfs_index_context *icx)
 	const s64 pos = ntfs_ib_vcn_to_pos(icx, vcn);
         ntfs_inode *idx_ni=icx->idx_ni;
        	const u32 bk_size  = idx_ni->itype.index.block_size;
-	s64 written;
+	//s64 written;
 	struct inode *vi = VFS_I(idx_ni);
 
-	struct address_space *mapping = VFS_I(idx_ni)->i_mapping;
+	//struct address_space *mapping = VFS_I(idx_ni)->i_mapping;
 	struct page *pages[NTFS_MAX_PAGES_PER_CLUSTER];
 	size_t bytes;
 	unsigned nr_pages;
@@ -2097,7 +2097,7 @@ int ntfs_directory_context_write(ntfs_index_context *icx)
 			bytes = bk_size;
 
 		{
-			pgoff_t start_idx = pos >> PAGE_SHIFT;
+//			pgoff_t start_idx = pos >> PAGE_SHIFT;
 			pages[0]=icx->page;
 #if 0
 			/*
@@ -2982,7 +2982,6 @@ void ntfs_dump_file_name_attr(const char* prompt,const FILE_NAME_ATTR* filename)
 void ntfs_dump_index_entry(INDEX_ENTRY* ie)
 {
 #ifdef DEBUG
-	int i = 0;
 	ntfs_dump_file_name_attr("Index Entry Simple Name",&(ie->key.file_name));
 	if (ie->flags & INDEX_ENTRY_NODE)
 	{
@@ -3143,6 +3142,7 @@ int ntfs_icx_parent_inc(ntfs_index_context *icx)
 	return STATUS_OK;
 }
 
+/*
 static int ntfs_icx_parent_dec(ntfs_index_context *icx)
 {
 	icx->pindex--;
@@ -3152,6 +3152,7 @@ static int ntfs_icx_parent_dec(ntfs_index_context *icx)
 	}
 	return STATUS_OK;
 }
+*/
 
 /**
  * ntfs_lookup_inode_by_key - fill ictx with information of the file 
@@ -3503,8 +3504,6 @@ err_out:
 		unmap_mft_record(dir_ni);
 	ntfs_debug("done.");
 	return err;
-dir_err_out:
-	goto err_out;
 }
 int ntfs_lookup_inode_by_filename (const FILE_NAME_ATTR *filename, 
 		/* output */ ntfs_index_context *ictx)
@@ -3595,7 +3594,7 @@ static int ntfs_copy_context_tail(ntfs_index_context *icx,
         ntfs_inode *idx_ni=icx->idx_ni;
        	const u32 bk_size  = idx_ni->itype.index.block_size;
 	
-	ntfs_debug("Entering,copy to %d\n",new_vcn);
+	ntfs_debug("Entering,copy to %lld\n",new_vcn);
 	
 	dst = ntfs_ib_alloc(new_vcn, bk_size, 
 			    src->index.flags & NODE_MASK);
@@ -3623,6 +3622,7 @@ static int ntfs_copy_context_tail(ntfs_index_context *icx,
 }
 
 
+#if 0
 static int ntfs_ih_insert(INDEX_HEADER *ih, INDEX_ENTRY *orig_ie, VCN new_vcn, 
 			  int pos)
 {
@@ -3652,11 +3652,15 @@ out:
 	
 	return ret;
 }
+#endif
+#if 0 
 static VCN ntfs_icx_parent_pos(ntfs_index_context *icx)
 {
 	        return icx->parent_pos[icx->pindex];
 }
+#endif
 
+#if 0
 static int ntfs_ir_insert_median(ntfs_index_context *icx, INDEX_ENTRY *median,
 				 VCN new_vcn)
 {
@@ -3691,10 +3695,13 @@ static int ntfs_ir_insert_median(ntfs_index_context *icx, INDEX_ENTRY *median,
 	return ntfs_ih_insert(&icx->ir->index, median, new_vcn, 
 			      ntfs_icx_parent_pos(icx));
 }
+#endif
+#if 0
 static VCN ntfs_icx_parent_vcn(ntfs_index_context *icx)
 {
 	        return icx->parent_vcn[icx->pindex];
 }
+#endif
 
 /** 
  *  Find the last entry in the index block

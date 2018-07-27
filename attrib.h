@@ -165,7 +165,7 @@ inline static void ntfs_dump_attr_name(const char* prompt,const ATTR_RECORD* a)
 #ifdef DEBUG
 	int i = 0;
 	char temp_name[500];
-	ntfschar* name_start = (char*)a + a->name_offset;
+	ntfschar* name_start = (ntfschar*)(((char*)a) + a->name_offset);
 	snprintf(temp_name,400,"%c ", (char)(name_start[i]));
 	for(i = 1 ; i < a->name_length ; i++ )
 	{                                               

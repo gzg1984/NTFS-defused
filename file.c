@@ -497,18 +497,13 @@ out:
 	return err;
 }
 
+#include "compat.h"
 static inline int ntfs_submit_bh_for_read(struct buffer_head *bh)
 {
 	lock_buffer(bh);
 	get_bh(bh);
 	bh->b_end_io = end_buffer_read_sync;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-	return submit_bh(REQ_OP_READ, 0, bh);
-#else
-	return submit_bh(READ, bh);
-
-#endif
-
+	return ntfs_read_bh(bh);
 }
 
 /**
@@ -695,12 +690,7 @@ map_buffer_cached:
 					set_buffer_uptodate(bh);
 				if (unlikely(was_hole)) {
 					/* We allocated the buffer. */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-					clean_bdev_bh_alias(bh);
-#else
-					unmap_underlying_metadata(bh->b_bdev,
-							bh->b_blocknr);
-#endif
+					ntfs_clean_bh(bh);
 					if (bh_end <= pos || bh_pos >= end)
 						mark_buffer_dirty(bh);
 					else
@@ -743,11 +733,7 @@ map_buffer_cached:
 				continue;
 			}
 			/* We allocated the buffer. */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-			clean_bdev_bh_alias(bh);
-#else
-			unmap_underlying_metadata(bh->b_bdev, bh->b_blocknr);
-#endif
+			ntfs_clean_bh(bh);
 
 			/*
 			 * If the buffer is fully outside the write, zero it,
@@ -1915,20 +1901,8 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (iov_iter_count(from) && !err)
 		written = ntfs_file_data_write(file, from, iocb->ki_pos);
 	current->backing_dev_info = NULL;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-	inode_unlock(vi);
-	iocb->ki_pos += written;
-	if (likely(written > 0))
-		written = generic_write_sync(iocb, written);
-#else
-        mutex_unlock(&vi->i_mutex);
-        if (likely(written > 0)) {
-                err = generic_write_sync(file, iocb->ki_pos, written);
-                if (err < 0)
-                        written = 0;
-        }
-        iocb->ki_pos += written;
-#endif
+
+	written=ntfs_write_iocb(iocb,written);
 	return written ? written : err;
 }
 

@@ -1,3 +1,3 @@
 #!/bin/sh
 ./CreateNtfsImage.sh
-./TEST_mkdir.sh
+./TEST_sub_touch.sh
