@@ -14,8 +14,6 @@ umount /run/temp
 
 ./LoadModule.sh
 
-
-exit 0
 # Test Content
 touch /run/temp/a/b
 dmesg -c >  ${0}.kernel.log
