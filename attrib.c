@@ -594,6 +594,7 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 	ntfs_volume *vol = ctx->ntfs_ino->vol;
 	ntfschar *upcase = vol->upcase;
 	u32 upcase_len = vol->upcase_len;
+	ntfs_debug("Try Find for [%s]\n",attr_type_string(type));
 
 	/*
 	 * Iterate over attributes in mft record starting at @ctx->attr, or the
@@ -610,13 +611,24 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 				le32_to_cpu(ctx->mrec->bytes_allocated))
 			break;
 		ctx->attr = a;
+		/* If we want to list every attr 
+		 */
+		debug_show_attr(ctx->attr);
 		if (unlikely(le32_to_cpu(a->type) > le32_to_cpu(type) ||
 				a->type == AT_END))
 			return -ENOENT;
 		if (unlikely(!a->length))
+		{
+			ntfs_debug("No Length for [%s],corrupted?\n",attr_type_string(a->type));
 			break;
+		}
 		if (a->type != type)
+		{
+			ntfs_debug("Want [%X][%s], but current is [%X][%s],continue\n",
+					type,attr_type_string(type),
+					a->type,attr_type_string(a->type));
 			continue;
+		}
 		/*
 		 * If @name is present, compare the two names.  If @name is
 		 * missing, assume we want an unnamed attribute.
@@ -624,7 +636,10 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 		if (!name) {
 			/* The search failed if the found attribute is named. */
 			if (a->name_length)
+			{
+				ntfs_debug("No name_length for [%s],corrupted?\n",attr_type_string(a->type));
 				return -ENOENT;
+			}
 		} else if (!ntfs_are_names_equal(name, name_len,
 			    (ntfschar*)((u8*)a + le16_to_cpu(a->name_offset)),
 			    a->name_length, ic, upcase, upcase_len)) {
@@ -643,7 +658,24 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 				return -ENOENT;
 			/* If the strings are not equal, continue search. */
 			if (rc)
+			{
+				ntfs_debug("Type is equal but name is not [IGNORE_CASE]? continue\n");
+				{
+#ifdef DEBUG
+					int i = 0;
+					char temp_name[1024];
+					snprintf(temp_name,1000,"%c ", (char)(name[i]));
+					for(i = 1 ; i < name_len ; i++ )
+					{                                               
+						snprintf(temp_name,1000,"%s%c ",temp_name,(char)(name[i]));
+					}                                                                               
+					ntfs_debug("Want name:[%s]",temp_name);
+					ntfs_dump_attr_name("Current ATTR name",a);
+#endif
+				}
+
 				continue;
+			}
 			rc = ntfs_collate_names(name, name_len,
 					(ntfschar*)((u8*)a +
 					le16_to_cpu(a->name_offset)),
@@ -652,7 +684,11 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 			if (rc == -1)
 				return -ENOENT;
 			if (rc)
+			{
+				ntfs_debug("Type is equal but name is not [CASE_SENSITIVE]? continue\n");
 				continue;
+			}
+			/* if rc is 0 , name maching! */
 		}
 		/*
 		 * The names match or @name not present and attribute is
@@ -868,6 +904,7 @@ static int ntfs_external_attr_find(const ATTR_TYPE type,
 	u32 al_name_len;
 	int err = 0;
 	static const char *es = " Unmount and run chkdsk.";
+	ntfs_debug("Looking for External [%s]\n",attr_type_string(type));
 
 	ni = ctx->ntfs_ino;
 	base_ni = ctx->base_ntfs_ino;
@@ -1191,7 +1228,7 @@ int ntfs_attr_lookup(const ATTR_TYPE type, const ntfschar *name,
 {
 	ntfs_inode *base_ni;
 
-	ntfs_debug("Entering.");
+	ntfs_debug("Looking For [%s] Attr\n",attr_type_string(type));
 	BUG_ON(IS_ERR(ctx->mrec));
 	if (ctx->base_ntfs_ino)
 		base_ni = ctx->base_ntfs_ino;

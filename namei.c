@@ -329,12 +329,11 @@ static int ntfs_create_index_entry(ntfs_inode *dir_ni, FILE_NAME_ATTR *fn, MFT_R
 	/* Insert Index_Entry into
 	 * Index_Root or Index_Allocation */
 	ret = ntfs_ie_add(dir_ni, ie);
-out:
 	if(ie)
 	{
 		kfree(ie);
 	}
-	ntfs_debug("done");
+	ntfs_debug("ntfs_create_index_entry done");
 	return ret;
 }
 
@@ -527,26 +526,126 @@ static void ntfs_create_attr_data( MFT_RECORD* const mrec,
 	attr_data=(ATTR_REC) 
 	{
 		.type = AT_DATA ,
-			.length = attr_data_len,
+		.length = attr_data_len,
+		.non_resident = 0,
+		.name_length = 0,
+		.name_offset = 0,
+		.flags =  0 ,
+		.instance = (mrec->next_attr_instance) ++ ,
+		.data=
+		{
+			.resident=
+			{
+				.value_length = 0,
+				.value_offset = attr_data_len  ,
+				.flags = 0 ,
+			}
+		},
+	};
+	debug_show_attr(&attr_data);
+	/** insert DATA into new_file_record **/
+	memcpy(&(new_record[*pnew_offset]),&attr_data, attr_data_len );
+	(*pnew_offset) += attr_data_len ;
+}
+#define const_cpu_to_le16(x)    ((le16) __constant_cpu_to_le16(x))
+#define const_cpu_to_le32(x)    ((le32) __constant_cpu_to_le32(x))
+
+static void ntfs_create_attr_dir(ntfs_inode *new_dir_ntfs_inode,const ntfs_volume * const vol,MFT_RECORD* const mrec,
+		int* const pnew_offset )
+{
+	char* new_record=(char*)mrec;
+	const int attr_start = *pnew_offset;
+	/* Create INDEX_ROOT attribute. */
+	int index_len = sizeof(INDEX_HEADER) + sizeof(INDEX_ENTRY_HEADER);
+	int ir_len = offsetof(INDEX_ROOT, index) + index_len;
+	ntfschar NTFS_INDEX_I30[5] = { const_cpu_to_le16('$'), const_cpu_to_le16('I'),
+		const_cpu_to_le16('3'), const_cpu_to_le16('0'),
+		const_cpu_to_le16('\0') };
+	int attr_ir_len= sizeof(ATTR_REC) + 
+		((4/*name length*/ * sizeof(ntfschar) + 7) & ~7) + ((ir_len + 7) & ~7);
+	ATTR_REC attr_index_root;
+
+	/* Create INDEX_ROOT attribute. */
+	/* 这里只是数据内容，不是完整的attr.
+	 * 需要针对dir做一个完整的attr*/
+	INDEX_ROOT ir = (INDEX_ROOT) 
+	{
+		.type = AT_FILE_NAME,
+			.collation_rule = COLLATION_FILE_NAME,
+		.index_block_size = cpu_to_le32(vol->index_record_size),
+		.index=
+		{
+			.entries_offset = const_cpu_to_le32(sizeof(INDEX_HEADER)),
+			.index_length = cpu_to_le32(index_len),
+			.allocated_size = cpu_to_le32(index_len),
+		}
+	};
+	if (vol->cluster_size <= vol->index_record_size)
+		ir.clusters_per_index_block = vol->index_record_size >> vol->cluster_size_bits;
+	else                    
+		ir.clusters_per_index_block = vol->index_record_size >> NTFS_BLOCK_SIZE_BITS;
+
+	attr_index_root=(ATTR_REC) 
+	{
+		.type = AT_INDEX_ROOT ,
+			.length = attr_ir_len,
 			.non_resident = 0,
-			.name_length = 0,
-			.name_offset = 0,
-			.flags =  0 ,
+			.name_length = 4,
+			.name_offset = sizeof(ATTR_REC),
+			.flags =  const_cpu_to_le16(0) ,
 			.instance = (mrec->next_attr_instance) ++ ,
 			.data=
 			{
 				.resident=
 				{
-					.value_length = 0,
-					.value_offset = attr_data_len  ,
+					.value_length = cpu_to_le32(ir_len),
+					.value_offset = cpu_to_le16(attr_ir_len - ((ir_len + 7) & ~7))  ,
 					.flags = 0 ,
 				}
 			},
 	};
-	/** insert DATA into new_file_record **/
-	memcpy(&(new_record[*pnew_offset]),&attr_data, attr_data_len );
-	(*pnew_offset) += attr_data_len ;
+	/** insert ATTR into new_file_record **/
+	ntfs_debug("ATTR Header of Index Root:Overwrite offset from [%d] to [%d]", *pnew_offset , (*pnew_offset)+attr_ir_len-1);
+	memcpy(&(new_record[*pnew_offset]),&attr_index_root, attr_ir_len );
+	{
+		int name_start = (*pnew_offset)+ le16_to_cpu(attr_index_root.name_offset);
+		ntfs_debug("Attr Name: Overwrite offset from [%d] to [%d]", name_start , name_start + (sizeof(ntfschar) * 4));
+		memcpy(&(new_record[name_start]), NTFS_INDEX_I30, sizeof(ntfschar) * 4);
+	}
+	ntfs_dump_attr_name("After Copying name",&new_record[attr_start]);
+
+	(*pnew_offset) += attr_ir_len ;
+
+
+	/** insert INDEX ROOT into ATTR value **/
+	{
+		int ir_start=attr_start+le16_to_cpu(attr_index_root.data.resident.value_offset);
+		ntfs_debug("Attr Value:Overwrite offset from [%d] to [%d]", ir_start , ir_start+ir_len-1 );
+		memcpy(&(new_record[ir_start]),&ir, ir_len );
+		(*pnew_offset) += attr_ir_len ;
+		ntfs_dump_attr_name("After Copying INDEX ROOT into ATTR value",&new_record[attr_start]);
+	}
+
+
+	/* Creating First & Last IE */
+	{
+		INDEX_ENTRY ie = (INDEX_ENTRY) 
+		{
+			.length = const_cpu_to_le16(sizeof(INDEX_ENTRY_HEADER)),
+			.key_length = const_cpu_to_le16(0),
+			.flags = INDEX_ENTRY_END,
+		};
+		int ir_start=attr_start+le16_to_cpu(attr_index_root.data.resident.value_offset);
+		int ie_start=ir_start+sizeof(INDEX_ROOT);
+
+		/** insert DATA into new_file_record **/
+		ntfs_debug("INDEX_ENTRY Overwrite offset from [%d] to [%d]", ie_start , ie_start+sizeof(ie)-1);
+		memcpy(&(new_record[ie_start]),&ie, sizeof(ie) );
+	}
+	ntfs_dump_attr_name("After Copying IE",&new_record[attr_start]);
 	ntfs_debug("new_temp_offset [%d]",*pnew_offset);
+//	new_dir_ntfs_inode->data_size = size;
+	new_dir_ntfs_inode->allocated_size = (ir_len + 7) & ~7;
 }
 
 /* Start of SECURITY_DESCRIPTOR 
@@ -702,7 +801,9 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 		ntfs_debug("new $MFT File Record number [0x%x]",new_mft_record->mft_record_number);
 	}
 
-	/* Begin from here , error must goto err_out */
+	/*
+	 * Create STANDARD_INFORMATION attribute
+	 */
 	err = ntfs_create_attr_standard_infomation(new_mft_record,&new_temp_offset);
 	if(err)
 	{
@@ -714,7 +815,20 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 		ntfs_error((VFS_I(dir_ni))->i_sb,"ntfs_create_attr_security_descriptor failed.");
 		goto err_out;
 	}
-	ntfs_create_attr_data(new_mft_record,&new_temp_offset);
+	switch(type)
+	{
+		case S_IFREG:
+			ntfs_create_attr_data(new_mft_record,&new_temp_offset);
+			ntfs_debug("new_temp_offset [%d]",new_temp_offset);
+			break;
+		case S_IFDIR:
+			ntfs_create_attr_dir(new_ntfs_inode,dir_ni->vol,new_mft_record,&new_temp_offset);
+			break;
+		default:
+			ntfs_error((VFS_I(dir_ni))->i_sb,"Creating Unsupported type %X.",type);
+			goto err_out;
+
+	}
 	ntfs_create_attr_end(new_mft_record,&new_temp_offset);
 
 	/* Create FILE_NAME attribute  */
@@ -727,6 +841,9 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	{
 		goto err_out;
 	}
+#define FILE_ATTR_I30_INDEX_PRESENT      const_cpu_to_le32(0x10000000)
+	if (S_ISDIR(type))
+		fn->file_attributes = FILE_ATTR_I30_INDEX_PRESENT;
 
 	/* Add FILE_NAME attribute to the Stream in a new Index Entry,
 	 * Index Entry is in Index Record. */
@@ -746,26 +863,29 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	/* Start flush the $MFT File Record */
 	/**FIXME : it do not support hard link **/
 	new_mft_record->link_count = cpu_to_le16(1);
+	if (S_ISDIR(type))
+		new_mft_record->flags |= MFT_RECORD_IS_DIRECTORY;
+
 	/** MUST set this **/
 	new_mft_record->bytes_in_use = new_temp_offset;
-			if(in_atomic_preempt_off())
-			{
-				ntfs_debug("in_atomic_preempt_off is off before flush_dcache_mft_record_page ");
-			}
-			else
-			{
-				ntfs_debug("in_atomic_preempt_off is on before flush_dcache_mft_record_page");
-		       	}
+	if(in_atomic_preempt_off())
+	{
+		ntfs_debug("in_atomic_preempt_off is off before flush_dcache_mft_record_page ");
+	}
+	else
+	{
+		ntfs_debug("in_atomic_preempt_off is on before flush_dcache_mft_record_page");
+	}
 	flush_dcache_mft_record_page(new_ntfs_inode);
-			if(in_atomic_preempt_off())
-			{
-				ntfs_debug("in_atomic_preempt_off is off before mark_mft_record_dirty ");
-			}
+	if(in_atomic_preempt_off())
+	{
+		ntfs_debug("in_atomic_preempt_off is off before mark_mft_record_dirty ");
+	}
 	mark_mft_record_dirty(new_ntfs_inode);
-			if(in_atomic_preempt_off())
-			{
-				ntfs_debug("in_atomic_preempt_off is off before unmap_mft_record ");
-			}
+	if(in_atomic_preempt_off())
+	{
+		ntfs_debug("in_atomic_preempt_off is off before unmap_mft_record ");
+	}
 	unmap_mft_record(new_ntfs_inode);
 
 	(VFS_I(new_ntfs_inode))->i_op = &ntfs_file_inode_ops;
@@ -781,14 +901,14 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	}
 
 	(VFS_I(new_ntfs_inode))->i_blocks = new_ntfs_inode->allocated_size >> 9;
-			if(in_atomic_preempt_off())
-			{
-				ntfs_debug("in_atomic_preempt_off is off before return ");
-			}
-			else
-			{
-				ntfs_debug("in_atomic_preempt_off is on before return");
-		       	}
+	if(in_atomic_preempt_off())
+	{
+		ntfs_debug("in_atomic_preempt_off is off before return ");
+	}
+	else
+	{
+		ntfs_debug("in_atomic_preempt_off is on before return");
+	}
 
 
 	ntfs_debug("Done.");
@@ -813,26 +933,32 @@ err_out:
 	return ERR_PTR(err);
 }
 
-/**
- * Some wrappers around __ntfs_create() ...
- * Check the File type
+/*
+ * 2018. July 14
+ * Add IFDIR case by Gordon
  */
 static ntfs_inode *ntfs_create_ntfs_inode(ntfs_inode *dir_ni, ntfschar *name, u8 name_len,
 		dev_t type)
 {
-	/*TODO : type could be { S_IFREG S_IFDIR  S_IFIFO  S_IFSOCK } */
-	if (type != S_IFREG ) 
+	switch(type)
 	{
-		ntfs_error((VFS_I(dir_ni))->i_sb,"Invalid arguments.");
-		return ERR_PTR(-EOPNOTSUPP);
+		case S_IFREG:
+		case S_IFDIR:
+			return __ntfs_create(dir_ni, name, name_len, type);
+		case S_IFIFO:
+		case S_IFSOCK:
+			ntfs_error((VFS_I(dir_ni))->i_sb,"Unsupported arguments.");
+			return ERR_PTR(-EOPNOTSUPP);
+		default:
+			ntfs_error((VFS_I(dir_ni))->i_sb,"Invalid arguments [%X]. Only support [%X][%X]",
+					type,S_IFREG,S_IFDIR);
+			return ERR_PTR(-EINVAL);
 	}
-	return __ntfs_create(dir_ni, name, name_len, type);
 }
-
 static int ntfs_create_vfs_inode(struct inode *dir,
-				struct dentry *dent,
-				umode_t mode, 
-				bool __unused )
+		struct dentry *dent,
+		umode_t mode, 
+		bool __unused )
 {
 	ntfschar *uname;
 	int uname_len;
@@ -870,63 +996,70 @@ static int ntfs_create_vfs_inode(struct inode *dir,
 	}
 
 }
+static int ntfs_mkdir(struct inode *dir,
+		struct dentry *dent,
+		umode_t mode)
+{
+	return ntfs_create_vfs_inode(dir,dent,mode|S_IFDIR,0/*unused*/);
+}
+
 
 /*TODO:
-static int ntfs_index_rm_node(ntfs_index_context *icx)
-{
-	int entry_pos, pindex;
-	VCN vcn;
-	INDEX_BLOCK *ib = NULL;
-	INDEX_ENTRY *ie_succ, *ie, *entry = icx->entry;
-	INDEX_HEADER *ih;
-	u32 new_size;
-	int delta, ret = STATUS_ERROR;
+  static int ntfs_index_rm_node(ntfs_index_context *icx)
+  {
+  int entry_pos, pindex;
+  VCN vcn;
+  INDEX_BLOCK *ib = NULL;
+  INDEX_ENTRY *ie_succ, *ie, *entry = icx->entry;
+  INDEX_HEADER *ih;
+  u32 new_size;
+  int delta, ret = STATUS_ERROR;
 
-	ntfs_debug("Entering");
-	
-	if (!icx->ia_na) {
-		icx->ia_na = ntfs_ia_open(icx, icx->ni);
-		if (!icx->ia_na)
-			return STATUS_ERROR;
-	}
+  ntfs_debug("Entering");
 
-	ib = ntfs_malloc(icx->block_size);
-	if (!ib)
-		return STATUS_ERROR;
-	
-	ie_succ = ntfs_ie_get_next(icx->entry);
-	entry_pos = icx->parent_pos[icx->pindex]++;
-	pindex = icx->pindex;
+  if (!icx->ia_na) {
+  icx->ia_na = ntfs_ia_open(icx, icx->ni);
+  if (!icx->ia_na)
+  return STATUS_ERROR;
+  }
+
+  ib = ntfs_malloc(icx->block_size);
+  if (!ib)
+  return STATUS_ERROR;
+
+  ie_succ = ntfs_ie_get_next(icx->entry);
+  entry_pos = icx->parent_pos[icx->pindex]++;
+  pindex = icx->pindex;
 descend:
-	vcn = ntfs_ie_get_vcn(ie_succ);
-	if (ntfs_ib_read(icx, vcn, ib))
-		goto out;
-	
-	ie_succ = ntfs_ie_get_first(&ib->index);
+vcn = ntfs_ie_get_vcn(ie_succ);
+if (ntfs_ib_read(icx, vcn, ib))
+goto out;
 
-	if (ntfs_icx_parent_inc(icx))
-		goto out;
-	
-	icx->parent_vcn[icx->pindex] = vcn;
-	icx->parent_pos[icx->pindex] = 0;
+ie_succ = ntfs_ie_get_first(&ib->index);
 
-	if ((ib->index.ih_flags & NODE_MASK) == INDEX_NODE)
-		goto descend;
+if (ntfs_icx_parent_inc(icx))
+goto out;
 
-	if (ntfs_ih_zero_entry(&ib->index)) {
-		errno = EIO;
-		ntfs_log_perror("Empty index block");
-		goto out;
-	}
+icx->parent_vcn[icx->pindex] = vcn;
+icx->parent_pos[icx->pindex] = 0;
 
-	ie = ntfs_ie_dup(ie_succ);
-	if (!ie)
-		goto out;
-	
-	if (ntfs_ie_add_vcn(&ie))
-		goto out2;
+if ((ib->index.ih_flags & NODE_MASK) == INDEX_NODE)
+goto descend;
 
-	ntfs_ie_set_vcn(ie, ntfs_ie_get_vcn(icx->entry));
+if (ntfs_ih_zero_entry(&ib->index)) {
+errno = EIO;
+ntfs_log_perror("Empty index block");
+goto out;
+}
+
+ie = ntfs_ie_dup(ie_succ);
+if (!ie)
+goto out;
+
+if (ntfs_ie_add_vcn(&ie))
+goto out2;
+
+ntfs_ie_set_vcn(ie, ntfs_ie_get_vcn(icx->entry));
 
 	if (icx->is_in_root)
 		ih = &icx->ir->index;
@@ -1286,9 +1419,12 @@ static int ntfs_unlink_vfs_inode(struct inode *pi,struct dentry *pd)
 /**
  * Inode operations for directories.
  */
+        int (*mkdir) (struct inode *,struct dentry *,umode_t);
+
 const struct inode_operations ntfs_dir_inode_ops = {
 	.lookup	= ntfs_lookup,	/* VFS: Lookup directory. */
 #ifdef NTFS_RW
+	.mkdir = ntfs_mkdir,
 	.create = ntfs_create_vfs_inode, 
 	.unlink = ntfs_unlink_vfs_inode,
 #endif

@@ -725,6 +725,7 @@ bool ntfs_is_logfile_clean(struct inode *log_vi, const RESTART_PAGE_HEADER *rp)
  * checked by a call to ntfs_check_logfile() and that ntfs_is_logfile_clean()
  * has been used to ensure that the $LogFile is clean.
  */
+#include "compat.h"
 bool ntfs_empty_logfile(struct inode *log_vi)
 {
 	VCN vcn, end_vcn;
@@ -823,11 +824,7 @@ map_vcn:
 			 * completed ignore errors afterwards as we can assume
 			 * that if one buffer worked all of them will work.
 			 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-			submit_bh(REQ_OP_WRITE, 0, bh);
-#else
-			submit_bh(WRITE, bh);
-#endif
+			ntfs_write_bh(bh);
 			if (should_wait) {
 				should_wait = false;
 				wait_on_buffer(bh);

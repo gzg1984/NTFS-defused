@@ -3032,7 +3032,8 @@ struct kmem_cache *ntfs_big_inode_cache;
 static void ntfs_big_inode_init_once(void *foo)
 {
 	ntfs_inode *ni = (ntfs_inode *)foo;
-
+	ni->ir_snapshot = NULL;
+	ni->ir_snapshot_length = 0;
 	inode_init_once(VFS_I(ni));
 }
 
@@ -3054,12 +3055,12 @@ static struct dentry *ntfs_mount(struct file_system_type *fs_type,
 
 static struct file_system_type ntfs_fs_type = {
 	.owner		= THIS_MODULE,
-	.name		= "ntfs",
+	.name		= "ntfs-gordon",
 	.mount		= ntfs_mount,
 	.kill_sb	= kill_block_super,
 	.fs_flags	= FS_REQUIRES_DEV,
 };
-MODULE_ALIAS_FS("ntfs");
+MODULE_ALIAS_FS("ntfs-gordon");
 
 /* Stable names for the slab caches. */
 static const char ntfs_index_ctx_cache_name[] = "ntfs_index_ctx_cache";
@@ -3170,7 +3171,7 @@ ictx_err_out:
 
 static void __exit exit_ntfs_fs(void)
 {
-	ntfs_debug("Unregistering NTFS driver.");
+	ntfs_debug("Unregistering NTFS driver.\n");
 
 	unregister_filesystem(&ntfs_fs_type);
 
@@ -3189,6 +3190,7 @@ static void __exit exit_ntfs_fs(void)
 }
 
 MODULE_AUTHOR("Anton Altaparmakov <anton@tuxera.com>");
+MODULE_AUTHOR("Gao Zhi Gang <gzg1984@aliyun.com>");
 MODULE_DESCRIPTION("NTFS 1.2/3.x driver - Copyright (c) 2001-2014 Anton Altaparmakov and Tuxera Inc.");
 MODULE_VERSION(NTFS_VERSION);
 MODULE_LICENSE("GPL");

@@ -1,10 +1,6 @@
 NTFS-defused
 ============
 
-currently work-in-progress
-===========================
-
-An attempt to complete the native Linux NTFS read/write kernel driver using code from Apple (http://www.opensource.apple.com/source/ntfs/ntfs-83/kext/) as a reference.
 
 
 currently work-in-progress
@@ -31,6 +27,11 @@ https://flatcap.github.io/linux-ntfs/ntfs/
 Currently this source can work with 4.1 kernel.
 
 I am making a tag and go on for 4.4 kernel
+
+15th July 2018
+Happy New year!
+I am working on ubuntu16.04 kernel 4.4
+to add mkdir feature
 
 Debug Tips 
 ===========================

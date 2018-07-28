@@ -80,7 +80,9 @@ extern MFT_REF ntfs_lookup_inode_by_name(ntfs_inode *dir_ni,
  */
 typedef struct {
 	/* For insert popurse */
-	ntfs_inode *idx_ni;
+	ntfs_inode * idx_ni;
+	MFT_RECORD *m;/* map result of idx_ni */
+
 	INDEX_ENTRY *entry;
 	void *data;
 	u16 data_len;
@@ -186,7 +188,7 @@ extern void ntfs_ie_set_vcn(INDEX_ENTRY *ie, VCN vcn);
 extern INDEX_ENTRY *ntfs_ie_get_by_pos(INDEX_HEADER *ih, int pos);
 extern void ntfs_ie_insert(INDEX_HEADER *ih, INDEX_ENTRY *ie, INDEX_ENTRY *pos); 
 extern VCN ntfs_ie_get_vcn(INDEX_ENTRY *ie);
-extern int ntfs_ir_make_space(ntfs_index_context *icx, int data_size);
+//extern int ntfs_ir_make_space(ntfs_index_context *icx, int data_size);
 
 void ntfs_dump_index_entry(INDEX_ENTRY* ie);
 

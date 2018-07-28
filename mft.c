@@ -86,7 +86,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 			goto err_out;
 		}
 	}
-	ntfs_debug("[%s]Before ntfs_map_page 0x%lx.", current->comm, index);
+	ntfs_debug("[%s]Before ntfs_map_page 0x%lx.\n", current->comm, index);
 	/* Read, map, and pin the page. */
 	page = ntfs_map_page(mft_vi->i_mapping, index);
 	if (likely(!IS_ERR(page))) {
@@ -98,7 +98,7 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 			return page_address(page) + ofs;
 		}
 		ntfs_error(vol->sb, "Mft record 0x%lx is corrupt.  "
-				"Run chkdsk.", ni->mft_no);
+				"Run chkdsk.\n", ni->mft_no);
 		ntfs_unmap_page(page);
 		page = ERR_PTR(-EIO);
 		NVolSetErrors(vol);
@@ -164,7 +164,7 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
 {
 	MFT_RECORD *m;
 
-	ntfs_debug("[%s]Entering for mft_no 0x%lx.", 
+	ntfs_debug("[%s]Entering for mft_no 0x%lx.\n", 
 			current->comm,ni->mft_no);
 
 	/* Make sure the ntfs inode doesn't go away. */
@@ -183,7 +183,7 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
 
 	mutex_unlock(&ni->mrec_lock);
 	atomic_dec(&ni->count);
-	ntfs_error(ni->vol->sb, "Failed with error code %lu.", -PTR_ERR(m));
+	ntfs_error(ni->vol->sb, "Failed with error code %lu.\n", -PTR_ERR(m));
 	return m;
 }
 
@@ -475,6 +475,7 @@ static int ntfs_sync_mft_mirror_umount(ntfs_volume *vol,
  * TODO:  If @sync is false, want to do truly asynchronous i/o, i.e. just
  * schedule i/o via ->writepage or do it via kntfsd or whatever.
  */
+#include "compat.h"
 int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 		MFT_RECORD *m, int sync)
 {
@@ -605,11 +606,7 @@ int ntfs_sync_mft_mirror(ntfs_volume *vol, const unsigned long mft_no,
 			clear_buffer_dirty(tbh);
 			get_bh(tbh);
 			tbh->b_end_io = end_buffer_write_sync;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-			submit_bh(REQ_OP_WRITE, 0, tbh);
-#else
-			submit_bh(WRITE, tbh);
-#endif
+			ntfs_write_bh(tbh);
 		}
 		/* Wait on i/o completion of buffers. */
 		for (i_bhs = 0; i_bhs < nr_bhs; i_bhs++) {
@@ -802,11 +799,7 @@ int write_mft_record_nolock(ntfs_inode *ni, MFT_RECORD *m, int sync)
 		clear_buffer_dirty(tbh);
 		get_bh(tbh);
 		tbh->b_end_io = end_buffer_write_sync;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
-		submit_bh(REQ_OP_WRITE, 0, tbh);
-#else
-		submit_bh(WRITE, tbh);
-#endif
+		ntfs_write_bh(tbh);
 	}
 	/* Synchronize the mft mirror now if not @sync. */
 	if (!sync && ni->mft_no < vol->mftmirr_size)
@@ -1433,6 +1426,7 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(ntfs_volume *vol)
 		goto undo_alloc;
 	}
 	a = ctx->attr;
+	debug_show_attr(a);
 	ll = sle64_to_cpu(a->data.non_resident.lowest_vcn);
 	/* Search back for the previous last allocated cluster of mft bitmap. */
 	for (rl2 = rl; rl2 > mftbmp_ni->runlist.rl; rl2--) {

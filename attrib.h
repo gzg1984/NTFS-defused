@@ -117,4 +117,85 @@ extern int ntfs_attr_set(ntfs_inode *ni, const s64 ofs, const s64 cnt,
 
 #endif /* NTFS_RW */
 
+static inline char* attr_type_string(ATTR_TYPE type)
+{
+	switch(type)
+	{
+		case AT_UNUSED:
+			return "AT_UNUSED";
+		case AT_STANDARD_INFORMATION:
+			return "AT_STANDARD_INFORMATION";
+		case AT_INDEX_ROOT:
+			return "AT_INDEX_ROOT";
+		case AT_INDEX_ALLOCATION:
+			return "AT_INDEX_ALLOCATION";
+		case AT_ATTRIBUTE_LIST:
+			return "AT_ATTRIBUTE_LIST";
+		case AT_FILE_NAME:
+			return "AT_FILE_NAME";
+		case AT_DATA:
+			return "AT_DATA";
+		case AT_END:
+			return "AT_END";
+		case AT_BITMAP:
+			return "AT_BITMAP";
+		case AT_VOLUME_NAME:
+			return "AT_VOLUME_NAME";
+		case AT_VOLUME_INFORMATION:
+			return "AT_VOLUME_INFORMATION";
+		case AT_SECURITY_DESCRIPTOR:
+			return "AT_SECURITY_DESCRIPTOR";
+		default:
+			return "Unknown";
+	}
+	return ":)";
+	/*
+					AT_OBJECT_ID                    = cpu_to_le32(      0x40),
+					AT_REPARSE_POINT                = cpu_to_le32(      0xc0),
+					AT_EA_INFORMATION               = cpu_to_le32(      0xd0),
+					AT_EA                           = cpu_to_le32(      0xe0),
+					AT_PROPERTY_SET                 = cpu_to_le32(      0xf0),
+					AT_LOGGED_UTILITY_STREAM        = cpu_to_le32(     0x100),
+					AT_FIRST_USER_DEFINED_ATTRIBUTE = cpu_to_le32(    0x1000),
+					*/
+
+}
+inline static void ntfs_dump_attr_name(const char* prompt,const ATTR_RECORD* a)
+{
+#ifdef DEBUG
+	int i = 0;
+	char temp_name[500];
+	ntfschar* name_start = (ntfschar*)(((char*)a) + a->name_offset);
+	snprintf(temp_name,400,"%c ", (char)(name_start[i]));
+	for(i = 1 ; i < a->name_length ; i++ )
+	{                                               
+		snprintf(temp_name,400,"%s%c ",temp_name,(char)(name_start[i]));
+	}                                                                               
+	ntfs_debug("%s:[%s]",prompt, temp_name);
+#endif
+}
+
+
+inline static void debug_show_attr(const ATTR_REC* const attr)
+{
+#ifdef DEBUG
+	printk("ATTR_RECORD\n");
+	printk("\tAttribute Type:%X[%s]\n",attr->type,attr_type_string(attr->type));
+	printk("\tLength:%d\n",attr->length);
+	printk("\tNon-resident flag:%d[%s]\n",attr->non_resident,attr->non_resident?"non-resident":"resident");
+	printk("\tName length:%d\n",attr->name_length);
+	printk("\tOffset to the Name:%d\n",attr->name_offset);
+	if(attr->name_length)
+		ntfs_dump_attr_name("ATTR name:",attr);
+	printk("\tFlags:%X\n",attr->flags);
+	printk("\tAttribute Id:%d\n",attr->instance);
+	if(!attr->non_resident)
+	{
+		printk("\tRESIDENT\n");
+		printk("\t\tLength of the Attribute:%d\n",attr->data.resident.value_length);
+		printk("\t\tOffset to the Attribute:%d\n",attr->data.resident.value_offset);
+		printk("\t\tIndexed flag:%d\n",attr->data.resident.flags);
+	}
+#endif
+}
 #endif /* _LINUX_NTFS_ATTRIB_H */
