@@ -2569,7 +2569,9 @@ static int ntfs_ir_truncate(ntfs_index_context *icx, int data_size)
 		   return STATUS_ERROR;
 		   */
 
-		icx->ir->index.allocated_size = cpu_to_le32(data_size);
+		INDEX_ROOT* ir = (INDEX_ROOT*)((u8*)temp_search_ctx->attr +
+					le16_to_cpu(temp_search_ctx->attr->data.resident.value_offset));
+		ir->index.allocated_size = cpu_to_le32(data_size);
 
 	} else if (ret == -EPERM)
 	{
@@ -2595,7 +2597,7 @@ err_out:
 static int ntfs_ir_make_space(ntfs_index_context *icx, int data_size)
 {			  
 	int ret;
-	ntfs_debug("Entering");
+	ntfs_debug("Entering for new size %d",data_size);
 	ret = ntfs_ir_truncate(icx, data_size);
 	/* TODO
 	if (ret == STATUS_RESIDENT_ATTRIBUTE_FILLED_MFT) 
