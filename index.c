@@ -33,7 +33,7 @@
 ntfschar I30[5] = { cpu_to_le16('$'), cpu_to_le16('I'),
 	cpu_to_le16('3'),       cpu_to_le16('0'), 0 };
 
-int ntfs_ir_make_space(ntfs_index_context *icx, int data_size);
+static int ntfs_ir_make_space(ntfs_index_context *icx, int data_size);
 
 void what_handling(const ntfs_inode* ni)
 {
@@ -2592,7 +2592,7 @@ err_out:
  * On success return STATUS_OK or STATUS_KEEP_SEARCHING.
  * On error return STATUS_ERROR.
  */
-int ntfs_ir_make_space(ntfs_index_context *icx, int data_size)
+static int ntfs_ir_make_space(ntfs_index_context *icx, int data_size)
 {			  
 	int ret;
 	ntfs_debug("Entering");
@@ -2689,6 +2689,8 @@ int ntfs_ie_add(ntfs_inode *idx_ni, INDEX_ENTRY *ie)
 		/** else  it will make space for new index entry **/
 		if (icx->is_in_root) 
 		{
+			ntfs_index_ctx_put(icx);
+			icx=ntfs_index_ctx_get(idx_ni);
 			ret = ntfs_ir_make_space(icx, new_size);
 			if ( ret )
 			{
@@ -2741,35 +2743,35 @@ int ntfs_ie_add(ntfs_inode *idx_ni, INDEX_ENTRY *ie)
 	
 	ntfs_debug("Got Enough Space");
 	/* Insert the INDEX_ENTRY into the ih */
-			if(in_atomic_preempt_off())
-			{
-				ntfs_debug("in_atomic_preempt_off is off before ntfs_ie_insert ");
-			}
-			else
-			{
-				ntfs_debug("in_atomic_preempt_off is on before ntfs_ie_insert ");
-		       	}
+	if(in_atomic_preempt_off())
+	{
+		ntfs_debug("in_atomic_preempt_off is off before ntfs_ie_insert ");
+	}
+	else
+	{
+		ntfs_debug("in_atomic_preempt_off is on before ntfs_ie_insert ");
+	}
 	ntfs_ie_insert(ih, ie, icx->entry);
-			if(in_atomic_preempt_off())
-			{
-				ntfs_debug("in_atomic_preempt_off is off after ntfs_ie_insert ");
-			}
-			else
-			{
-				ntfs_debug("in_atomic_preempt_off is on after ntfs_ie_insert ");
-		       	}
+	if(in_atomic_preempt_off())
+	{
+		ntfs_debug("in_atomic_preempt_off is off after ntfs_ie_insert ");
+	}
+	else
+	{
+		ntfs_debug("in_atomic_preempt_off is on after ntfs_ie_insert ");
+	}
 
 	ntfs_index_entry_flush_dcache_page(icx);
 	ntfs_index_entry_mark_dirty(icx);
-	
+
 	ret = STATUS_OK;
 err_out:
 out:
-        if(icx)
-        {
-                ntfs_index_ctx_put(icx);
+	if(icx)
+	{
+		ntfs_index_ctx_put(icx);
 		icx=NULL;
-        }
+	}
 	ntfs_debug("%s", ret ? "Failed" : "Done");
 	return ret;
 }
@@ -2779,9 +2781,9 @@ static int ntfs_ih_numof_entries(INDEX_HEADER *ih)
 	int n;
 	INDEX_ENTRY *ie;
 	u8 *end;
-	
+
 	ntfs_debug("Entering");
-	
+
 	end = ntfs_ie_get_end(ih);
 	ie = ntfs_ie_get_first(ih);
 	for (n = 0; !ntfs_ie_end(ie) && (u8 *)ie < end; n++)
@@ -2815,7 +2817,7 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 	int ret = STATUS_OK;
 
 	ntfs_debug("Entering");
-	
+
 	if (!icx || (!icx->ia && !icx->ir) || ntfs_ie_end(icx->entry)) 
 	{
 		ntfs_debug("Invalid arguments.");
@@ -2830,13 +2832,13 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 	{
 		ih = &icx->ia->index;
 	}
-	
+
 	if (icx->entry->flags & INDEX_ENTRY_NODE) 
 	{ 
 		ntfs_debug("INDEX_ENTRY_NODE Not supported now.");
 		/* TODO:
-		ret = ntfs_index_rm_node(icx); 
-		*/
+		   ret = ntfs_index_rm_node(icx); 
+		   */
 		ret =  -EOPNOTSUPP ;
 		goto err_out;
 	} 
@@ -2968,12 +2970,13 @@ void set_index_context_with_result(ntfs_index_context* ictx,INDEX_ENTRY* ie)
 void ntfs_dump_file_name_attr(const char* prompt,const FILE_NAME_ATTR* filename)
 {
 #ifdef DEBUG
+#define TEMP_LENGTH 400
 	int i = 0;
-	char temp_name[1024];
-	snprintf(temp_name,1000," %c ", (char)(filename->file_name[i]));
+	char temp_name[TEMP_LENGTH];
+	snprintf(temp_name,TEMP_LENGTH," %c ", (char)(filename->file_name[i]));
 	for(i = 1 ; i < filename->file_name_length ; i++ )
 	{
-		snprintf(temp_name,1000,"%s%c",temp_name,(char)(filename->file_name[i]));
+		snprintf(temp_name,TEMP_LENGTH,"%s%c",temp_name,(char)(filename->file_name[i]));
 	}
 	ntfs_debug("%s:[%s]",prompt, temp_name);
 #endif
@@ -3238,7 +3241,7 @@ int _ntfs_index_lookup (const ntfschar* uname,const int uname_len,
 	if(!err)
 	{
 		ictx->parent_vcn[ictx->pindex] = old_vcn;
-		ntfs_debug("Locate the file in Index Root");
+		ntfs_debug("Locate the file in Index Root, Not really error.");
 		return err;
 	}
 	else if (err < 0 )
@@ -3254,7 +3257,10 @@ int _ntfs_index_lookup (const ntfschar* uname,const int uname_len,
 		 * mft reference associated with it.
 		 */
 		ntfs_debug("Entry not found in INDEX_ROOT and there is no subnode");
-		return -ENOENT;
+		/* return with dir_ni mapped and locked.
+		 * if we need to modify it,
+		 * unmap it first.*/
+		return  -ENOENT;
 	}
 	else
 	{
@@ -3490,7 +3496,9 @@ found_it2:
 	 */
 	ntfs_debug("Entry not found.");
 	err = -ENOENT;
-	/* keep the page mapped and locked **/
+	/* keep the page mapped and locked,
+	 * but why ?
+	 * TODO: make the lock requirment better to understand. **/
 	return err;
 unm_err_out:
 	unlock_page(page);
