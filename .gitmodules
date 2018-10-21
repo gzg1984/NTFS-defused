@@ -1,0 +1,3 @@
+[submodule "fstest"]
+	path = fstest
+	url = git@github.com:gzg1984/pjd-fstest.git
