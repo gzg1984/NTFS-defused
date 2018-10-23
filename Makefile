@@ -70,6 +70,10 @@ test: fstest/fstest /run/temp reload_ko script/ntfs.img
 	fstest/fstest unlink /run/temp/create_test 
 	fstest/fstest mkdir /run/temp/create_test 0777
 	fstest/fstest rmdir /run/temp/create_test 
+	fstest/fstest mkdir /run/temp/create_test 0777
+	fstest/fstest create /run/temp/create_test/1 0666
+	fstest/fstest unlink /run/temp/create_test/1 0666
+	fstest/fstest rmdir /run/temp/create_test 
 	dmesg -c >  create.log
 	umount /run/temp
 	modprobe -r ntfs
