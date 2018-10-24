@@ -663,7 +663,7 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 				{
 #ifdef DEBUG
 					int i = 0;
-					char temp_name[1024];
+					char temp_name[512];
 					snprintf(temp_name,1000,"%c ", (char)(name[i]));
 					for(i = 1 ; i < name_len ; i++ )
 					{                                               

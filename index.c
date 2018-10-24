@@ -2480,21 +2480,6 @@ INDEX_ENTRY *ntfs_ie_get_by_pos(INDEX_HEADER *ih, int pos)
 	return ie;
 }
 
-void ntfs_ie_insert(INDEX_HEADER *ih, INDEX_ENTRY *ie, INDEX_ENTRY *pos);
-/**
- *  *  Insert @ie index entry at @pos entry. Used @ih values should be ok already.
-{
-	int ie_size = le16_to_cpu(ie->length);
-
-	ntfs_debug("Entering\n");
-
-	ih->index_length = cpu_to_le32(le32_to_cpu(ih->index_length) + ie_size);
-	memmove((u8 *)pos + ie_size, pos,
-			le32_to_cpu(ih->index_length) - ((u8 *)pos - (u8 *)ih) - ie_size);
-	memcpy(pos, ie, ie_size);
-}
- *   */
-
 /**
  * ntfs_ir_truncate - Truncate index root attribute
  * 
@@ -2890,26 +2875,39 @@ err_out:
 	ntfs_debug("Done ");
 	return ret;
 }
-/** 20091014 **/
+/** 
+ * 20091014 First line is writen
+ * 2018.Oct.24 we found it will cause system hang
+ * and try to fix it**/
 int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen)
 {
 	int ret = STATUS_ERROR;
 	ntfs_index_context *icx;
 
+	if (!key)
+	{
+		ntfs_debug("Could not perform deleting via NULL key");
+		return -1;
+	}
+
 	icx = ntfs_index_ctx_get(ni);
 	if (!icx)
 	{
+		ntfs_debug("Creating temporary searching conetext fail...");
 		return -1;
 	}
 
 	while (1) 
 	{
+		/* Try get the Entry for Key */
 		if ( (ret = ntfs_lookup_inode_by_filename (key, icx) ) )
 		{
+			/* If there is no Entry*/
 			ntfs_debug("ntfs_lookup_inode_by_key faild ...");
 			goto err_out;
 		}
 
+		/*There is Entry in icx , remove it now*/
 		ret = ntfs_index_rm(icx);
 		if (ret == STATUS_OK)
 		{

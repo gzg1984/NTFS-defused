@@ -3,11 +3,12 @@ ifneq ($(KERNELRELEASE),)
 obj-$(CONFIG_NTFS_FS) += ntfs.o
 
 ntfs-y := aops.o attrib.o collate.o compress.o debug.o file.o \
-	  index.o  mst.o namei.o runlist.o super.o sysctl.o \
+	  mst.o runlist.o super.o sysctl.o \
 	  unistr.o upcase.o mft.o \
 	  inode.o ntfs_inode.o 
-# For Folders
-ntfs-y += dir.o index_root.o
+# For Index Entry Handler
+ntfs-y += dir.o index.o index_root.o namei.o \
+	index_entry_create.o
 # For compatition
 ntfs-y += compat.o
 
@@ -61,7 +62,6 @@ reload_ko:ntfs.ko
 	echo 1 > /proc/sys/fs/ntfs-debug
 
 test: fstest/fstest /run/temp reload_ko script/ntfs.img
-	cd script
 	mount -t ntfs-gordon script/ntfs.img /run/temp -o loop
 	#For create
 	fstest/fstest create /run/temp/create_test 0777
