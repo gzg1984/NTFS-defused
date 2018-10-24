@@ -478,7 +478,7 @@ static int ntfs_create_attr_security_descriptor( MFT_RECORD* const mrec,
 			},
 	};
 
-	/** insert FILE_NAME into new_file_record **/
+	/** insert AT_SECURITY_DESCRIPTOR into new_file_record **/
 	memcpy(&(new_record[*pnew_offset]) , &attr_sd,  attr_sd_len);
 	memcpy(&(new_record[*pnew_offset + attr_sd_len]), sd ,sd_len);
 	(*pnew_offset) += attr_sd.length;
@@ -545,6 +545,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 		temp_new_record=(char*)new_mft_record;
 		ntfs_debug("new $MFT File Record number [0x%x]",new_mft_record->mft_record_number);
 	}
+	ntfs_debug("new_temp_offset [%d]\n",new_temp_offset);
 
 	/*
 	 * Create STANDARD_INFORMATION attribute
@@ -554,28 +555,7 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	{
 		goto err_out;
 	}
-	err = ntfs_create_attr_security_descriptor(new_mft_record,&new_temp_offset);
-	if(err)
-	{
-		ntfs_error((VFS_I(dir_ni))->i_sb,"ntfs_create_attr_security_descriptor failed.");
-		goto err_out;
-	}
-	switch(type)
-	{
-		case S_IFREG:
-			ntfs_create_attr_data(new_mft_record,&new_temp_offset);
-			ntfs_debug("new_temp_offset [%d]",new_temp_offset);
-			break;
-		case S_IFDIR:
-			ntfs_create_attr_dir(new_ntfs_inode,dir_ni->vol,new_mft_record,&new_temp_offset);
-			break;
-		default:
-			ntfs_error((VFS_I(dir_ni))->i_sb,"Creating Unsupported type %X.",type);
-			goto err_out;
-
-	}
-	ntfs_create_attr_end(new_mft_record,&new_temp_offset);
-
+	ntfs_debug("new_temp_offset [%d]\n",new_temp_offset);
 	/* Create FILE_NAME attribute  */
 	err = ntfs_create_attr_file_name(dir_ni,name,name_len,
 			new_ntfs_inode,
@@ -586,9 +566,37 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	{
 		goto err_out;
 	}
+	ntfs_debug("new_temp_offset [%d]\n",new_temp_offset);
+	err = ntfs_create_attr_security_descriptor(new_mft_record,&new_temp_offset);
+	if(err)
+	{
+		ntfs_error((VFS_I(dir_ni))->i_sb,"ntfs_create_attr_security_descriptor failed.");
+		goto err_out;
+	}
+	ntfs_debug("new_temp_offset [%d]\n",new_temp_offset);
+	switch(type)
+	{
+		case S_IFREG:
+			ntfs_create_attr_data(new_mft_record,&new_temp_offset);
+			ntfs_debug("new_temp_offset [%d]\n",new_temp_offset);
+			break;
+		case S_IFDIR:
+			ntfs_create_attr_dir(new_ntfs_inode,dir_ni->vol,new_mft_record,&new_temp_offset);
+			break;
+		default:
+			ntfs_error((VFS_I(dir_ni))->i_sb,"Creating Unsupported type %X.",type);
+			goto err_out;
+
+	}
+
 #define FILE_ATTR_I30_INDEX_PRESENT      const_cpu_to_le32(0x10000000)
 	if (S_ISDIR(type))
 		fn->file_attributes = FILE_ATTR_I30_INDEX_PRESENT;
+
+	/* Create END attribute  */
+	ntfs_create_attr_end(new_mft_record,&new_temp_offset);
+	ntfs_debug("new_temp_offset [%d]\n",new_temp_offset);
+	/* new_temp_offset will NOT be changed in this function */
 
 	/* Add FILE_NAME attribute to the Stream in a new Index Entry,
 	 * Index Entry is in Index Record. */

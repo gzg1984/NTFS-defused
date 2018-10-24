@@ -387,7 +387,8 @@ static int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 		goto err_out;
 	}
 	while (!ntfs_attr_lookup(AT_FILE_NAME, NULL, 0, CASE_SENSITIVE,
-			0, NULL, 0, actx)) {
+			0, NULL, 0, actx)) 
+	{
 
 		fn = (FILE_NAME_ATTR*)((u8*)actx->attr +
 				le16_to_cpu(actx->attr->data.resident.value_offset));
@@ -400,10 +401,20 @@ static int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 				       (long long unsigned)MREF_LE(fn->parent_directory));
 			continue;
 		}
-		     
-		break;
+		else
+		{
+			break;
+		}
 	}
 	
+	if(!fn)
+	{
+		ntfs_debug("Can Not Find AT_FILE_NAME in node ? FATAL! actx->attr->data.resident.value_offset is [%d]",
+				actx->attr->data.resident.value_offset); 
+		err=-EIO;
+		goto err_out;
+	}
+
 	if ( (err = ntfs_index_remove(dir_ni, fn, 
 		le32_to_cpu(actx->attr->data.resident.value_length)) ) )
 	{
