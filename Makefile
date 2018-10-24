@@ -8,7 +8,8 @@ ntfs-y := aops.o attrib.o collate.o compress.o debug.o file.o \
 	  inode.o ntfs_inode.o 
 # For Index Entry Handler
 ntfs-y += dir.o index.o index_root.o namei.o \
-	index_entry_create.o
+	index_entry_create.o \
+	index_entry_delete.o
 # For compatition
 ntfs-y += compat.o
 
@@ -65,19 +66,18 @@ test: fstest/fstest /run/temp reload_ko script/ntfs.img
 	mount -t ntfs-gordon script/ntfs.img /run/temp -o loop
 	#For create
 	fstest/fstest create /run/temp/create_test 0777
-	fstest/fstest unlink /run/temp/create_test 
-	fstest/fstest create /run/temp/create_test 0666
-	fstest/fstest unlink /run/temp/create_test 
-	fstest/fstest mkdir /run/temp/create_test 0777
-	fstest/fstest rmdir /run/temp/create_test 
-	fstest/fstest mkdir /run/temp/create_test 0777
-	fstest/fstest create /run/temp/create_test/1 0666
-	fstest/fstest unlink /run/temp/create_test/1 0666
-	fstest/fstest rmdir /run/temp/create_test 
-	dmesg -c >  create.log
+	#fstest/fstest unlink /run/temp/create_test 
+	#fstest/fstest create /run/temp/create_test 0666
+	#fstest/fstest unlink /run/temp/create_test 
+	#fstest/fstest mkdir /run/temp/create_test 0777
+	#fstest/fstest rmdir /run/temp/create_test 
+	#fstest/fstest mkdir /run/temp/create_test 0777
+	#fstest/fstest create /run/temp/create_test/1 0666
+	#fstest/fstest unlink /run/temp/create_test/1 0666
+	#fstest/fstest rmdir /run/temp/create_test 
 	umount /run/temp
 	modprobe -r ntfs
-	dmesg  -c > umount_rmmod.log
+	dmesg  -c > test.log
 
 endif
 
