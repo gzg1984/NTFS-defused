@@ -215,6 +215,8 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 		
 		if (icx->is_in_root) 
 		{
+			/* Should call NOLOCK version,
+			 * because icx searching has mapped ictx->idx_ni */
 			ret = ntfs_ir_truncate(icx, le32_to_cpu(ih->index_length));
 			if (ret != STATUS_OK)
 			{

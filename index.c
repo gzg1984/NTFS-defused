@@ -122,7 +122,8 @@ void ntfs_index_ctx_put(ntfs_index_context *ictx)
 		if (ictx->is_in_root) {
 			if (ictx->actx)
 				ntfs_attr_put_search_ctx(ictx->actx);
-			if (ictx->base_ni)
+			/*TODO: banish the base_ni pointer */
+			if (ictx->base_ni && ictx->base_ni->page)
 				unmap_mft_record(ictx->base_ni);
 		} else {
 			struct page *page = ictx->page;
@@ -922,23 +923,23 @@ int _ntfs_index_lookup_ir_with_call_back (const ntfschar* uname,const int uname_
 		ie_comparer func,ntfs_index_context *ictx)
 {
 	ntfs_attr_search_ctx *temp_search_ctx;
-	ntfs_inode *dir_ni=ictx->idx_ni;
-	ntfs_volume *vol = dir_ni->vol;
+	ntfs_volume *vol = ictx->idx_ni->vol;
 	struct super_block *sb = vol->sb;
 	int err;
 
-	MFT_RECORD *m;
-
 	/* Get hold of the mft record for the directory. */
-	m = map_mft_record(dir_ni);
-	if (IS_ERR(m)) 
+	if(!ictx->m)
 	{
-		ntfs_error(sb, "map_mft_record() failed with error code %ld.",
-				-PTR_ERR(m));
-		return ERR_MREF(PTR_ERR(m));
+		ictx->m = map_mft_record(ictx->idx_ni);
+		if (IS_ERR(ictx->m)) 
+		{
+			ntfs_error(sb, "map_mft_record() failed with error code %ld.",
+					-PTR_ERR(ictx->m));
+			return ERR_MREF(PTR_ERR(ictx->m));
+		}
 	}
 	/* Allocate and initilize the temp search context **/
-	temp_search_ctx = ntfs_attr_get_search_ctx(dir_ni, m);
+	temp_search_ctx = ntfs_attr_get_search_ctx(ictx->idx_ni, ictx->m);
 	if (unlikely(!temp_search_ctx)) 
 	{
 		return  -ENOMEM;
@@ -950,7 +951,7 @@ int _ntfs_index_lookup_ir_with_call_back (const ntfschar* uname,const int uname_
 		if (err == -ENOENT) {
 			ntfs_error(sb, "Index root attribute missing in "
 					"directory inode 0x%lx.",
-					dir_ni->mft_no);
+					ictx->idx_ni->mft_no);
 			err = -EIO;
 		}
 		ntfs_attr_put_search_ctx(temp_search_ctx);
@@ -965,7 +966,7 @@ int _ntfs_index_lookup_ir_with_call_back (const ntfschar* uname,const int uname_
 	ictx->actx = temp_search_ctx;
 	ictx->ia = NULL;
 	ictx->page = NULL;
-	ictx->base_ni = dir_ni;
+	ictx->base_ni = ictx->idx_ni;
 	return _ntfs_ir_lookup_by_name_with_call_back(uname,uname_len,
 			func,ictx);
 
@@ -975,9 +976,8 @@ int _ntfs_index_lookup_with_call_back (const ntfschar* uname,const int uname_len
 
 {
 	ntfs_index_context *ictx=parameter;
-	ntfs_inode* dir_ni = ictx->idx_ni ;
 	
-	ntfs_volume *vol = dir_ni->vol;
+	ntfs_volume *vol = ictx->idx_ni->vol;
 	struct super_block *sb = vol->sb;
 
 	INDEX_ENTRY *ie;
@@ -989,8 +989,8 @@ int _ntfs_index_lookup_with_call_back (const ntfschar* uname,const int uname_len
 	struct page *page;
 	u8 *kaddr;
 
-	BUG_ON(!S_ISDIR(VFS_I(dir_ni)->i_mode));
-	BUG_ON(NInoAttr(dir_ni));
+	BUG_ON(!S_ISDIR(VFS_I(ictx->idx_ni)->i_mode));
+	BUG_ON(NInoAttr(ictx->idx_ni));
 
 	/** Phase 1: index root **/
 	old_vcn = VCN_INDEX_ROOT_PARENT;
@@ -1022,13 +1022,14 @@ int _ntfs_index_lookup_with_call_back (const ntfschar* uname,const int uname_len
 	else
 	{
 		/* Consistency check: Verify that an index allocation exists. */
-		if (!NInoIndexAllocPresent(dir_ni)) {
+		if (!NInoIndexAllocPresent(ictx->idx_ni)) {
 			ntfs_error(sb, "No index allocation attribute but index entry "
 					"requires one. Directory inode 0x%lx is "
-					"corrupt or driver bug.", dir_ni->mft_no);
+					"corrupt or driver bug.", ictx->idx_ni->mft_no);
 			ictx->entry = NULL;
 			ntfs_attr_put_search_ctx(ictx->actx);
 			ictx->actx = NULL;
+			ictx->m = NULL;
 			unmap_mft_record(ictx->idx_ni);
 			goto err_out;
 		}
@@ -1045,6 +1046,7 @@ int _ntfs_index_lookup_with_call_back (const ntfschar* uname,const int uname_len
 		ictx->entry = NULL;
 		ntfs_attr_put_search_ctx(ictx->actx);
 		ictx->actx = NULL;
+		ictx->m = NULL;
 		unmap_mft_record(ictx->idx_ni);
 	}
 
@@ -1052,7 +1054,7 @@ int _ntfs_index_lookup_with_call_back (const ntfschar* uname,const int uname_len
 	/* Phase 2:
 	 * searching in Index_Allocation , accroding to the VCN */
 	/* The mapping of the directory is only for the INDEX_ALLOCATION */
-	ia_mapping = VFS_I(dir_ni)->i_mapping;
+	ia_mapping = VFS_I(ictx->idx_ni)->i_mapping;
 descend_into_child_node:
 	ictx->parent_vcn[ictx->pindex] = old_vcn;
 	if (ntfs_icx_parent_inc(ictx)) {
@@ -1065,7 +1067,7 @@ descend_into_child_node:
 	 * disk if necessary.
 	 */
 	ntfs_debug("Mapping page for VCN 0x%llx",vcn);
-	page = ntfs_map_page(ia_mapping, ntfs_vcn_to_pos(vcn,dir_ni) >> PAGE_SHIFT);
+	page = ntfs_map_page(ia_mapping, ntfs_vcn_to_pos(vcn,ictx->idx_ni) >> PAGE_SHIFT);
 	if (IS_ERR(page)) {
 		ntfs_error(sb, "Failed to map directory index page, error %ld.",
 				-PTR_ERR(page));
@@ -1076,18 +1078,18 @@ descend_into_child_node:
 	kaddr = (u8*)page_address(page);
 fast_descend_into_child_node:
 	/* Get to the index allocation block. */
-	ia = (INDEX_ALLOCATION*)(kaddr + offset_in_page(ntfs_vcn_to_pos(vcn,dir_ni)));
+	ia = (INDEX_ALLOCATION*)(kaddr + offset_in_page(ntfs_vcn_to_pos(vcn,ictx->idx_ni)));
 	/* Bounds checks. */
 	if ((u8*)ia < kaddr || (u8*)ia > kaddr + PAGE_SIZE) {
 		ntfs_error(sb, "Out of bounds check failed. Corrupt directory "
-				"inode 0x%lx or driver bug.", dir_ni->mft_no);
+				"inode 0x%lx or driver bug.", ictx->idx_ni->mft_no);
 		goto unm_err_out;
 	}
 	/* Catch multi sector transfer fixup errors. */
 	if (unlikely(!ntfs_is_indx_record(ia->magic))) {
 		ntfs_error(sb, "Directory index record with vcn 0x%llx is "
 				"corrupt.  Corrupt inode 0x%lx.  Run chkdsk.",
-				(unsigned long long)vcn, dir_ni->mft_no);
+				(unsigned long long)vcn, ictx->idx_ni->mft_no);
 		goto unm_err_out;
 	}
 	if (sle64_to_cpu(ia->index_block_vcn) != vcn) {
@@ -1096,34 +1098,34 @@ fast_descend_into_child_node:
 				"Directory inode 0x%lx is corrupt or driver "
 				"bug.", (unsigned long long)
 				sle64_to_cpu(ia->index_block_vcn),
-				(unsigned long long)vcn, dir_ni->mft_no);
+				(unsigned long long)vcn, ictx->idx_ni->mft_no);
 		goto unm_err_out;
 	}
 	if (le32_to_cpu(ia->index.allocated_size) + 0x18 !=
-			dir_ni->itype.index.block_size) {
+			ictx->idx_ni->itype.index.block_size) {
 		ntfs_error(sb, "Index buffer (VCN 0x%llx) of directory inode "
 				"0x%lx has a size (%u) differing from the "
 				"directory specified size (%u). Directory "
 				"inode is corrupt or driver bug.",
-				(unsigned long long)vcn, dir_ni->mft_no,
+				(unsigned long long)vcn, ictx->idx_ni->mft_no,
 				le32_to_cpu(ia->index.allocated_size) + 0x18,
-				dir_ni->itype.index.block_size);
+				ictx->idx_ni->itype.index.block_size);
 		goto unm_err_out;
 	}
-	index_end = (u8*)ia + dir_ni->itype.index.block_size;
+	index_end = (u8*)ia + ictx->idx_ni->itype.index.block_size;
 	if (index_end > kaddr + PAGE_SIZE) {
 		ntfs_error(sb, "Index buffer (VCN 0x%llx) of directory inode "
 				"0x%lx crosses page boundary. Impossible! "
 				"Cannot access! This is probably a bug in the "
 				"driver.", (unsigned long long)vcn,
-				dir_ni->mft_no);
+				ictx->idx_ni->mft_no);
 		goto unm_err_out;
 	}
 	index_end = (u8*)&ia->index + le32_to_cpu(ia->index.index_length);
-	if (index_end > (u8*)ia + dir_ni->itype.index.block_size) {
+	if (index_end > (u8*)ia + ictx->idx_ni->itype.index.block_size) {
 		ntfs_error(sb, "Size of index buffer (VCN 0x%llx) of directory "
 				"inode 0x%lx exceeds maximum size.",
-				(unsigned long long)vcn, dir_ni->mft_no);
+				(unsigned long long)vcn, ictx->idx_ni->mft_no);
 		goto unm_err_out;
 	}
 
@@ -1138,7 +1140,7 @@ fast_descend_into_child_node:
 	{
 		ntfs_error(sb, "Index entry out of bounds in "
 				"directory inode 0x%lx.",
-				dir_ni->mft_no);
+				ictx->idx_ni->mft_no);
 		goto unm_err_out;
 	}
 	else if ( SHOULD_CHECK_SUBNODE == err )
@@ -1163,7 +1165,7 @@ fast_descend_into_child_node:
 		if ((ia->index.flags & NODE_MASK) == LEAF_NODE) {
 			ntfs_error(sb, "Index entry with child node found in "
 					"a leaf node in directory inode 0x%lx.",
-					dir_ni->mft_no);
+					ictx->idx_ni->mft_no);
 			goto unm_err_out;
 		}
 		/* Child node present, descend into it. */
@@ -1183,7 +1185,7 @@ fast_descend_into_child_node:
 			goto descend_into_child_node;
 		}
 		ntfs_error(sb, "Negative child node vcn in directory inode "
-				"0x%lx.", dir_ni->mft_no);
+				"0x%lx.", ictx->idx_ni->mft_no);
 		goto unm_err_out;
 	}
 	/*
@@ -2494,24 +2496,25 @@ extern int ntfs_ir_truncate(ntfs_index_context *icx, int data_size)
 
 	/* icx->actx is released now */
 	/* We should locate the INDEX_ROOT again **/
-	ntfs_inode* dir_ni = icx->idx_ni ;
-	ntfs_volume *vol = dir_ni->vol;
+	ntfs_volume *vol = icx->idx_ni->vol;
 	struct super_block *sb = vol->sb;
-	MFT_RECORD *m;
 	ntfs_attr_search_ctx *temp_search_ctx;
 
 
-	ntfs_debug("Entering");
+	ntfs_debug("Entering\n");
 	/* Get hold of the mft record for the directory. */
-	m = map_mft_record(dir_ni);
-	if (IS_ERR(m))
+	if(!icx->m)
 	{
-		ntfs_error(sb, "map_mft_record() failed with error code %ld.",
-				-PTR_ERR(m));
-		return ERR_MREF(PTR_ERR(m));
+		icx->m = map_mft_record(icx->idx_ni);
+		if (IS_ERR(icx->m))
+		{
+			ntfs_error(sb, "map_mft_record() failed with error code %ld.",
+					-PTR_ERR(icx->m));
+			return ERR_MREF(PTR_ERR(icx->m));
+		}
 	}
 	/* Allocate and initilize the temp search context **/
-	temp_search_ctx = ntfs_attr_get_search_ctx(dir_ni, m);
+	temp_search_ctx = ntfs_attr_get_search_ctx(icx->idx_ni, icx->m);
 	if (unlikely(!temp_search_ctx)) {
 		ret = -ENOMEM;
 		goto err_out;
@@ -2522,7 +2525,7 @@ extern int ntfs_ir_truncate(ntfs_index_context *icx, int data_size)
 		if (ret == -ENOENT) {
 			ntfs_error(sb, "Index root attribute missing in "
 					"directory inode 0x%lx.",
-					dir_ni->mft_no);
+					icx->idx_ni->mft_no);
 			ret = -EIO;
 		}
 		goto err_out;
@@ -2567,8 +2570,11 @@ extern int ntfs_ir_truncate(ntfs_index_context *icx, int data_size)
 	  ntfs_attr_close(na);
 	  */
 err_out:
-	if (m)
-		unmap_mft_record(dir_ni);
+	if (icx->m)
+	{
+		icx->m=NULL;
+		unmap_mft_record(icx->idx_ni);
+	}
 	ntfs_debug("Will return %d",ret);
 	return ret;
 }

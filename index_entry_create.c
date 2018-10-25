@@ -641,8 +641,24 @@ static ntfs_inode *__ntfs_create(ntfs_inode *dir_ni,
 	}
 	unmap_mft_record(new_ntfs_inode);
 
-	(VFS_I(new_ntfs_inode))->i_op = &ntfs_file_inode_ops;
-	(VFS_I(new_ntfs_inode))->i_fop = &ntfs_file_ops;
+	switch(type)
+	{
+		case S_IFREG:
+			(VFS_I(new_ntfs_inode))->i_op = &ntfs_file_inode_ops;
+			(VFS_I(new_ntfs_inode))->i_fop = &ntfs_file_ops;
+			break;
+		case S_IFDIR:
+			{
+				struct inode* new_vfs_inode=VFS_I(new_ntfs_inode);
+				new_vfs_inode->i_op = &ntfs_dir_inode_ops;
+				new_vfs_inode->i_fop = &ntfs_dir_ops;
+			}
+			break;
+		default:
+			ntfs_error((VFS_I(dir_ni))->i_sb,"Unsupport type %X, keep operation NULL",type);
+			break;
+
+	}
 
 	if (NInoMstProtected(new_ntfs_inode))
 	{

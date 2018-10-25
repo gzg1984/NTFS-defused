@@ -35,10 +35,10 @@ modules_install : modules
 
 clean:
 	make -C $(KERNEL_SRC) M=`pwd` clean
-	@find . -name "*~"|xargs rm
-	@rm -f *.log
-	@umount /run/temp
-	@rm -f /run/ntfs.img
+	-find . -name "*~"|xargs rm
+	-rm -f *.log
+	-umount /run/temp
+	-rm -f /run/ntfs.img
 
 # For test, Why we don't use script ?
 # Because we can use the Makefile dependency as comments
@@ -72,13 +72,13 @@ test: fstest/fstest /run/temp reload_ko /run/ntfs.img
 	#For create
 	fstest/fstest create /run/temp/create_test 0777
 	fstest/fstest unlink /run/temp/create_test 
-	#fstest/fstest create /run/temp/create_test 0666
-	#fstest/fstest unlink /run/temp/create_test 
+	fstest/fstest create /run/temp/create_test 0666
+	fstest/fstest unlink /run/temp/create_test 
 	#fstest/fstest mkdir /run/temp/create_test 0777
 	#fstest/fstest rmdir /run/temp/create_test 
-	#fstest/fstest mkdir /run/temp/create_test 0777
-	#fstest/fstest create /run/temp/create_test/1 0666
-	#fstest/fstest unlink /run/temp/create_test/1 0666
+	fstest/fstest mkdir /run/temp/create_test 0777
+	fstest/fstest create /run/temp/create_test/1 0666
+	fstest/fstest unlink /run/temp/create_test/1 
 	#fstest/fstest rmdir /run/temp/create_test 
 	umount /run/temp
 	modprobe -r ntfs
