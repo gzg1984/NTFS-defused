@@ -32,64 +32,71 @@
 #include "index.h"
 
 
+static int ntfs_index_rm_node(ntfs_index_context *icx)
+{
+	/*
+	int entry_pos, pindex;
+	INDEX_BLOCK *ib = NULL;
+	INDEX_ENTRY *ie_succ, *ie, *entry = icx->entry;
+	INDEX_HEADER *ih;
+	u32 new_size;
+	int delta, ret = STATUS_ERROR;
+	*/
+	INDEX_ENTRY *ie_succ;
+	VCN vcn;
 
+	ntfs_debug("Entering");
 
-/*TODO:
-  static int ntfs_index_rm_node(ntfs_index_context *icx)
-  {
-  int entry_pos, pindex;
-  VCN vcn;
-  INDEX_BLOCK *ib = NULL;
-  INDEX_ENTRY *ie_succ, *ie, *entry = icx->entry;
-  INDEX_HEADER *ih;
-  u32 new_size;
-  int delta, ret = STATUS_ERROR;
+	/*
+	if (!icx->ia_na) {
+		icx->ia_na = ntfs_ia_open(icx, icx->ni);
+		if (!icx->ia_na)
+			return STATUS_ERROR;
+	}
 
-  ntfs_debug("Entering");
+	ib = ntfs_malloc(icx->block_size);
+	if (!ib)
+		return STATUS_ERROR;
+		*/
 
-  if (!icx->ia_na) {
-  icx->ia_na = ntfs_ia_open(icx, icx->ni);
-  if (!icx->ia_na)
-  return STATUS_ERROR;
-  }
-
-  ib = ntfs_malloc(icx->block_size);
-  if (!ib)
-  return STATUS_ERROR;
-
-  ie_succ = ntfs_ie_get_next(icx->entry);
-  entry_pos = icx->parent_pos[icx->pindex]++;
-  pindex = icx->pindex;
+	ie_succ = ntfs_ie_get_next(icx->entry);
+	/*
+	entry_pos = icx->parent_pos[icx->pindex]++;
+	pindex = icx->pindex;
 descend:
-vcn = ntfs_ie_get_vcn(ie_succ);
-if (ntfs_ib_read(icx, vcn, ib))
-goto out;
+	*/
+	vcn = ntfs_ie_get_vcn(ie_succ);
+	ntfs_debug("Got vcn %lld\n",vcn);
+	return -EOPNOTSUPP ;
+	/*
+	if (ntfs_ib_read(icx, vcn, ib))
+		goto out;
 
-ie_succ = ntfs_ie_get_first(&ib->index);
+	ie_succ = ntfs_ie_get_first(&ib->index);
 
-if (ntfs_icx_parent_inc(icx))
-goto out;
+	if (ntfs_icx_parent_inc(icx))
+		goto out;
 
-icx->parent_vcn[icx->pindex] = vcn;
-icx->parent_pos[icx->pindex] = 0;
+	icx->parent_vcn[icx->pindex] = vcn;
+	icx->parent_pos[icx->pindex] = 0;
 
-if ((ib->index.ih_flags & NODE_MASK) == INDEX_NODE)
-goto descend;
+	if ((ib->index.ih_flags & NODE_MASK) == INDEX_NODE)
+		goto descend;
 
-if (ntfs_ih_zero_entry(&ib->index)) {
-errno = EIO;
-ntfs_log_perror("Empty index block");
-goto out;
-}
+	if (ntfs_ih_zero_entry(&ib->index)) {
+		errno = EIO;
+		ntfs_log_perror("Empty index block");
+		goto out;
+	}
 
-ie = ntfs_ie_dup(ie_succ);
-if (!ie)
-goto out;
+	ie = ntfs_ie_dup(ie_succ);
+	if (!ie)
+		goto out;
 
-if (ntfs_ie_add_vcn(&ie))
-goto out2;
+	if (ntfs_ie_add_vcn(&ie))
+		goto out2;
 
-ntfs_ie_set_vcn(ie, ntfs_ie_get_vcn(icx->entry));
+	ntfs_ie_set_vcn(ie, ntfs_ie_get_vcn(icx->entry));
 
 	if (icx->is_in_root)
 		ih = &icx->ir->index;
@@ -103,10 +110,10 @@ ntfs_ie_set_vcn(ie, ntfs_ie_get_vcn(icx->entry));
 			ret = ntfs_ir_make_space(icx, new_size);
 			if (ret != STATUS_OK)
 				goto out2;
-			
+
 			ih = &icx->ir->index;
 			entry = ntfs_ie_get_by_pos(ih, entry_pos);
-			
+
 		} else if (new_size > le32_to_cpu(ih->allocated_size)) {
 			icx->pindex = pindex;
 			ret = ntfs_ib_split(icx, icx->ib);
@@ -118,16 +125,16 @@ ntfs_ie_set_vcn(ie, ntfs_ie_get_vcn(icx->entry));
 
 	ntfs_ie_delete(ih, entry);
 	ntfs_ie_insert(ih, ie, entry);
-	
+
 	if (icx->is_in_root) {
 		if (ntfs_ir_truncate(icx, new_size))
 			goto out2;
 	} else
 		if (ntfs_icx_ib_write(icx))
 			goto out2;
-	
+
 	ntfs_ie_delete(&ib->index, ie_succ);
-	
+
 	if (ntfs_ih_zero_entry(&ib->index)) {
 		if (ntfs_index_rm_leaf(icx))
 			goto out2;
@@ -141,8 +148,8 @@ out2:
 out:
 	free(ib);
 	return ret;
+	*/
 }
-*/
 
 static void ntfs_ie_delete(INDEX_HEADER *ih, INDEX_ENTRY *ie)
 {
@@ -202,17 +209,15 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 
 	if (icx->entry->flags & INDEX_ENTRY_NODE) 
 	{ 
-		ntfs_debug("INDEX_ENTRY_NODE Not supported now.");
-		/* TODO:
-		   ret = ntfs_index_rm_node(icx); 
-		   */
-		ret =  -EOPNOTSUPP ;
-		goto err_out;
+		ret = ntfs_index_rm_node(icx); 
+		ntfs_debug("Removing INDEX_ENTRY_NODE is not supported\n");
+		/* will goto err_out */
 	} 
 	else if (icx->is_in_root || !ntfs_ih_one_entry(ih)) 
 	{
+		ntfs_debug("In root Or the Index Header has more than one entry...\n");
 		ntfs_ie_delete(ih, icx->entry);
-		
+
 		if (icx->is_in_root) 
 		{
 			/* Should call NOLOCK version,
@@ -222,7 +227,6 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 			{
 				goto err_out;
 			}
-			ntfs_debug("icx->is_in_root:Before flush_dcache_mft_record_page ");
 			flush_dcache_mft_record_page(icx->actx->ntfs_ino);
 
 			ntfs_debug("icx->is_in_root:Before mark_mft_record_dirty ");
@@ -231,25 +235,27 @@ static int ntfs_index_rm(ntfs_index_context *icx)
 		else
 		{
 			/* shut by Gzged
-			if (ntfs_icx_ib_write(icx))
-			{
-				goto err_out;
-			}
-			*/
+			   if (ntfs_icx_ib_write(icx))
+			   {
+			   goto err_out;
+			   }
+			   */
 			ntfs_index_entry_flush_dcache_page(icx);
 			ntfs_index_entry_mark_dirty(icx);
 		}
+		/* will goto err_out */
 	} 
 	else 
 	{
+		ntfs_debug("Unsupported  Entry flag [%x]\n",icx->entry->flags);
 		ret =  -EOPNOTSUPP ;
-		goto err_out;
+		/* will goto err_out */
 		/** not support yet
-		if (ntfs_index_rm_leaf(icx))
-		{
-			goto err_out;
-		}
-		**/
+		  if (ntfs_index_rm_leaf(icx))
+		  {
+		  goto err_out;
+		  }
+		 **/
 	}
 
 
@@ -302,29 +308,29 @@ static int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen)
 			goto err_out;
 		}
 		/*
-		flush_dcache_mft_record_page(icx->actx->ntfs_ino);
-		mark_mft_record_dirty(icx->actx->ntfs_ino);
-		*/
+		   flush_dcache_mft_record_page(icx->actx->ntfs_ino);
+		   mark_mft_record_dirty(icx->actx->ntfs_ino);
+		   */
 		/*FIXME:Gzged change
-		ntfs_inode_mark_dirty(icx->actx->ntfs_ino);
-		ntfs_index_ctx_reinit(icx);
-		***************/
+		  ntfs_inode_mark_dirty(icx->actx->ntfs_ino);
+		  ntfs_index_ctx_reinit(icx);
+		 ***************/
 		ntfs_index_ctx_put(icx);
 		icx=ntfs_index_ctx_get(ni);
 	}
 
 	/*
-	ntfs_debug("Before flush_dcache_mft_record_page ");
-	flush_dcache_mft_record_page(icx->actx->ntfs_ino);
-	ntfs_debug("Before mark_mft_record_dirty ");
-	mark_mft_record_dirty(icx->actx->ntfs_ino);
-	*/
+	   ntfs_debug("Before flush_dcache_mft_record_page ");
+	   flush_dcache_mft_record_page(icx->actx->ntfs_ino);
+	   ntfs_debug("Before mark_mft_record_dirty ");
+	   mark_mft_record_dirty(icx->actx->ntfs_ino);
+	   */
 	/*
-	ntfs_debug("Before ntfs_index_entry_flush_dcache_page ");
-	ntfs_index_entry_flush_dcache_page(icx);
-	ntfs_debug("Before ntfs_index_entry_mark_dirty ");
-	ntfs_index_entry_mark_dirty(icx);
-	*/
+	   ntfs_debug("Before ntfs_index_entry_flush_dcache_page ");
+	   ntfs_index_entry_flush_dcache_page(icx);
+	   ntfs_debug("Before ntfs_index_entry_mark_dirty ");
+	   ntfs_index_entry_mark_dirty(icx);
+	   */
 
 err_out:
 	ntfs_debug("Delete Done");
@@ -363,12 +369,14 @@ static int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 		goto err_out;
 	}
 
+	/*
 	if ( (mrec->flags & MFT_RECORD_IS_DIRECTORY) )
 	{
 		ntfs_debug("Deleting Folder is not supported, cancelling.");
 		err=  -EINVAL;
 		goto err_out;
 	}
+	*/
 
 	if (ni->nr_extents == -1)
 		ni = ni->ext.base_ntfs_ino;
@@ -389,18 +397,18 @@ static int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 		goto err_out;
 	}
 	while (!ntfs_attr_lookup(AT_FILE_NAME, NULL, 0, CASE_SENSITIVE,
-			0, NULL, 0, actx)) 
+				0, NULL, 0, actx)) 
 	{
 
 		fn = (FILE_NAME_ATTR*)((u8*)actx->attr +
 				le16_to_cpu(actx->attr->data.resident.value_offset));
-		
+
 		/* Ignore hard links from other directories */
 		if (dir_ni->mft_no != MREF_LE(fn->parent_directory)) {
 			ntfs_debug("MFT record numbers don't match "
-				       "(%llu != %llu)", 
-				       (long long unsigned)dir_ni->mft_no, 
-				       (long long unsigned)MREF_LE(fn->parent_directory));
+					"(%llu != %llu)", 
+					(long long unsigned)dir_ni->mft_no, 
+					(long long unsigned)MREF_LE(fn->parent_directory));
 			continue;
 		}
 		else
@@ -408,7 +416,7 @@ static int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 			break;
 		}
 	}
-	
+
 	if(!fn)
 	{
 		ntfs_debug("Can Not Find AT_FILE_NAME in node ? FATAL! actx->attr->data.resident.value_offset is [%d]",
@@ -418,12 +426,12 @@ static int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 	}
 
 	if ( (err = ntfs_index_remove(dir_ni, fn, 
-		le32_to_cpu(actx->attr->data.resident.value_length)) ) )
+					le32_to_cpu(actx->attr->data.resident.value_length)) ) )
 	{
 		ntfs_debug("ntfs_index_remove error.");
 		goto err_out;
 	}
-	
+
 	mrec->link_count = cpu_to_le16(le16_to_cpu( mrec->link_count) - 1);
 
 	flush_dcache_mft_record_page(ni);
@@ -432,7 +440,7 @@ static int ntfs_delete(ntfs_inode *ni, ntfs_inode *dir_ni )
 	ntfs_attr_put_search_ctx(actx);
 
 	actx = ntfs_attr_get_search_ctx(ni, mrec);
-	
+
 	err =  STATUS_OK ;
 	while (!ntfs_attrs_walk(actx)) 
 	{
@@ -517,7 +525,7 @@ extern int ntfs_unlink_vfs_inode(struct inode *pi,struct dentry *pd)
 	else
 	{
 		/** TODO: Set dirty after setting change time 
-			if the file still exist ?**/
+		  if the file still exist ?**/
 		pd->d_inode->i_ctime = pi->i_ctime;
 		inode_dec_link_count(pi); 
 		ntfs_debug("Done");

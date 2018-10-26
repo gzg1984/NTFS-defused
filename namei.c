@@ -423,4 +423,5 @@ const struct inode_operations ntfs_dir_inode_ops = {
 	.mkdir = ntfs_mkdir,
 	.create = ntfs_create_vfs_inode, 
 	.unlink = ntfs_unlink_vfs_inode,
+	.rmdir = ntfs_unlink_vfs_inode,
 };

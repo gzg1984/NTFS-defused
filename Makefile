@@ -74,12 +74,12 @@ test: fstest/fstest /run/temp reload_ko /run/ntfs.img
 	fstest/fstest unlink /run/temp/create_test 
 	fstest/fstest create /run/temp/create_test 0666
 	fstest/fstest unlink /run/temp/create_test 
-	#fstest/fstest mkdir /run/temp/create_test 0777
-	#fstest/fstest rmdir /run/temp/create_test 
+	fstest/fstest mkdir /run/temp/create_test 0777
+	fstest/fstest rmdir /run/temp/create_test 
 	fstest/fstest mkdir /run/temp/create_test 0777
 	fstest/fstest create /run/temp/create_test/1 0666
 	fstest/fstest unlink /run/temp/create_test/1 
-	#fstest/fstest rmdir /run/temp/create_test 
+	fstest/fstest rmdir /run/temp/create_test 
 	umount /run/temp
 	modprobe -r ntfs
 	dmesg  -c > test.log
