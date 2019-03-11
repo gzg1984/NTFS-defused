@@ -45,6 +45,7 @@ clean:
 #
 fstest/Makefile:
 	git submodule init fstest
+	git submodule update
 
 fstest/fstest:fstest/Makefile
 	make -C fstest
