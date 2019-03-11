@@ -11,7 +11,7 @@
 #include <linux/version.h>
 #include "compat.h"
 
-#define _FORCE_CHOOSEN_ 0
+#define _FORCE_CHOOSEN_ 1
 
 extern int ntfs_read_bh(struct buffer_head *bh)
 {
@@ -45,13 +45,13 @@ extern ssize_t ntfs_write_iocb(struct kiocb *iocb, ssize_t written)
 {
 	struct file *file = iocb->ki_filp;
 	struct inode *vi = file_inode(file);
-	int err = 0;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))||(_FORCE_CHOOSEN_==1)
 	inode_unlock(vi);
 	iocb->ki_pos += written;
 	if (likely(written > 0))
 		written = generic_write_sync(iocb, written);
 #else
+	int err = 0;
 	mutex_unlock(&vi->i_mutex);
 	if (likely(written > 0)) {
 		err = generic_write_sync(file, iocb->ki_pos, written);
