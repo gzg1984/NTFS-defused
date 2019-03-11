@@ -6,3 +6,4 @@
 tags
 Module.symvers
 modules.order
+*.log

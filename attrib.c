@@ -607,16 +607,35 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 		a = (ATTR_RECORD*)((u8*)ctx->attr +
 				le32_to_cpu(ctx->attr->length));
 	for (;;	a = (ATTR_RECORD*)((u8*)a + le32_to_cpu(a->length))) {
-		if ((u8*)a < (u8*)ctx->mrec || (u8*)a > (u8*)ctx->mrec +
-				le32_to_cpu(ctx->mrec->bytes_allocated))
+		if ((u8*)a < (u8*)ctx->mrec)
+		{
+			ntfs_debug("Current Pos[%p] is less than the MTF record Head [%p]? Corrupt!\n",
+					a,ctx->mrec);
 			break;
+
+		}	
+		else if( (u8*)a > ((u8*)ctx->mrec +
+				le32_to_cpu(ctx->mrec->bytes_allocated)) )
+		{
+			ntfs_debug("Current Pos[%p] is less than the MTF record End [%p]? Corrupt! bytes_allocated [%d]\n",
+					a,((u8*)ctx->mrec + le32_to_cpu(ctx->mrec->bytes_allocated)), ctx->mrec->bytes_allocated);
+			break;
+		}
 		ctx->attr = a;
 		/* If we want to list every attr 
 		 */
 		debug_show_attr(ctx->attr);
-		if (unlikely(le32_to_cpu(a->type) > le32_to_cpu(type) ||
-				a->type == AT_END))
+		if (unlikely(le32_to_cpu(a->type) > le32_to_cpu(type)))
+		{
+			ntfs_debug("Current Attr [%s]should be later than what we want[%s], quit\n",
+					attr_type_string(a->type),attr_type_string(type));
 			return -ENOENT;
+		}	
+		else if (unlikely( a->type == AT_END))
+		{
+			ntfs_debug("Touch End of All Attr, quit\n");
+			return -ENOENT;
+		}
 		if (unlikely(!a->length))
 		{
 			ntfs_debug("No Length for [%s],corrupted?\n",attr_type_string(a->type));
@@ -663,7 +682,7 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 				{
 #ifdef DEBUG
 					int i = 0;
-					char temp_name[1024];
+					char temp_name[512];
 					snprintf(temp_name,1000,"%c ", (char)(name[i]));
 					for(i = 1 ; i < name_len ; i++ )
 					{                                               

@@ -120,7 +120,6 @@ extern int _ntfs_index_lookup (const ntfschar* uname,const int uname_len,
 
 #ifdef NTFS_RW
 
-extern int ntfs_index_remove(ntfs_inode *ni, const void *key, const int keylen);
 extern int ntfs_split_current_index_allocation(ntfs_index_context *icx);
 
 /**
@@ -208,7 +207,6 @@ extern ntfschar I30[5];
  */
 #define ntfs_ie_get_first(ih) ((INDEX_ENTRY*)(((u8*)(ih)) + le32_to_cpu((ih)->entries_offset)))
 #define ntfs_ie_get_end(ih) (((u8*)(ih)) + le32_to_cpu((ih)->index_length))
-#define ntfs_ih_one_entry(ih) (ntfs_ih_numof_entries(ih) == 1)
 
 /* INDEX_ENTRY *ie
  */
@@ -231,6 +229,8 @@ extern ntfschar I30[5];
 #define STATUS_ERROR	(-1)
 
 extern void set_index_context_with_result(ntfs_index_context* ictx,INDEX_ENTRY* ie);
+extern int ntfs_ir_truncate(ntfs_index_context *icx, int data_size);
+
 
 
 #endif /* _LINUX_NTFS_INDEX_H */

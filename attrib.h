@@ -160,8 +160,10 @@ static inline char* attr_type_string(ATTR_TYPE type)
 					*/
 
 }
-inline static void ntfs_dump_attr_name(const char* prompt,const ATTR_RECORD* a)
+inline static void ntfs_dump_attr_name(const char* prompt,
+		/*const ATTR_RECORD* */const void* _a)
 {
+	const ATTR_RECORD* a = (ATTR_RECORD*) _a;
 #ifdef DEBUG
 	int i = 0;
 	char temp_name[500];
