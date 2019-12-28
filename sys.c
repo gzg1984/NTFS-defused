@@ -1,3 +1,4 @@
+#include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
@@ -44,16 +45,18 @@ static struct file_operations my_fops = {
 	.owner = THIS_MODULE,
 };
 
-static int __devinit my_probe(struct platform_device *pdev)
+static int my_probe(struct platform_device *pdev)
 {
 	struct resource *res;
 	struct mydev *dev;
-	struct class_device *class_dev;
+	//struct class_device *class_dev;
+	struct device *class_dev;
+
 	dev_t devno;
 	int ret;
 	
 	printk("Probe pdev->name: %s ; pdev->id: %d\n", pdev->name, pdev->id);
-	dev = (struct mydev *)kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = (struct mydev *)kmalloc(sizeof(*dev), GFP_KERNEL);
 	if (NULL == dev)
 		return -ENOMEM;
 
@@ -86,11 +89,14 @@ static int __devinit my_probe(struct platform_device *pdev)
 	cdev_add(&dev->mycdev, devno, 1);
 
 	/* create /sys/class/xxx */
-	class_dev = class_device_create(my_class, /* class */
+
+
+	class_dev = device_create(my_class, /* class */
 			NULL, /* parent */
 			devno, /* dev_t */
 			&pdev->dev, /* device* */
 			"shrek-%d", pdev->id); /* name */
+			/*
 	if (IS_ERR(class_dev)) {
 		printk("Cannot create /sys/class/xxx\n");
 		cdev_del(&dev->mycdev);
@@ -99,20 +105,23 @@ static int __devinit my_probe(struct platform_device *pdev)
 		return PTR_ERR(class_dev);
 	}
 
+*/
 	/* save dev to pdev */
 	platform_set_drvdata(pdev, dev);
 
 	return 0;
 }
 
-static int __devexit my_remove(struct platform_device *pdev)
+static int  my_remove(struct platform_device *pdev)
 {
 	struct mydev *dev = platform_get_drvdata(pdev);
 	dev_t devno = MKDEV(MY_MAJOR, pdev->id);
 
 	printk("Remove pdev->name: %s ; pdev->id: %d\n", pdev->name, pdev->id);
 
-	class_device_destroy(my_class, devno);
+	//class_device_destroy(my_class, devno);
+	device_destroy(my_class, devno);
+
 	cdev_del(&dev->mycdev);
 	unregister_chrdev_region(devno, 1);
 	kfree(dev);
