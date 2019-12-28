@@ -3053,14 +3053,14 @@ static struct dentry *ntfs_mount(struct file_system_type *fs_type,
 	return mount_bdev(fs_type, flags, dev_name, data, ntfs_fill_super);
 }
 
-static struct file_system_type ntfs_fs_type = {
+static struct file_system_type nntfs_fs_type = {
 	.owner		= THIS_MODULE,
-	.name		= "ntfs-gordon",
+	.name		= "nntfs",
 	.mount		= ntfs_mount,
 	.kill_sb	= kill_block_super,
 	.fs_flags	= FS_REQUIRES_DEV,
 };
-MODULE_ALIAS_FS("ntfs-gordon");
+MODULE_ALIAS_FS("nntfs");
 
 /* Stable names for the slab caches. */
 static const char ntfs_index_ctx_cache_name[] = "ntfs_index_ctx_cache";
@@ -3068,6 +3068,10 @@ static const char ntfs_attr_ctx_cache_name[] = "ntfs_attr_ctx_cache";
 static const char ntfs_name_cache_name[] = "ntfs_name_cache";
 static const char ntfs_inode_cache_name[] = "ntfs_inode_cache";
 static const char ntfs_big_inode_cache_name[] = "ntfs_big_inode_cache";
+
+
+extern int sys_init(void);
+extern int sys_exit(void);
 
 #include <linux/version.h>
 static int __init init_ntfs_fs(void)
@@ -3142,13 +3146,16 @@ static int __init init_ntfs_fs(void)
 		goto sysctl_err_out;
 	}
 
-	err = register_filesystem(&ntfs_fs_type);
-	if (!err) {
-		ntfs_debug("NTFS driver registered successfully.");
-		return 0; /* Success! */
+	err = register_filesystem(&nntfs_fs_type);
+	if (err) {
+		pr_crit("Failed to register NTFS filesystem driver!\n");
+		goto regfs_err_out;
 	}
-	pr_crit("Failed to register NTFS filesystem driver!\n");
+	ntfs_debug("NTFS driver registered successfully.");
+	sys_init();
+	return 0; /* Success! */
 
+regfs_err_out:
 	/* Unregister the ntfs sysctls. */
 	ntfs_sysctl(0);
 sysctl_err_out:
@@ -3172,8 +3179,9 @@ ictx_err_out:
 static void __exit exit_ntfs_fs(void)
 {
 	ntfs_debug("Unregistering NTFS driver.\n");
+	sys_exit();
 
-	unregister_filesystem(&ntfs_fs_type);
+	unregister_filesystem(&nntfs_fs_type);
 
 	/*
 	 * Make sure all delayed rcu free inodes are flushed before we
@@ -3189,9 +3197,8 @@ static void __exit exit_ntfs_fs(void)
 	ntfs_sysctl(0);
 }
 
-MODULE_AUTHOR("Anton Altaparmakov <anton@tuxera.com>");
 MODULE_AUTHOR("Gao Zhi Gang <gzg1984@aliyun.com>");
-MODULE_DESCRIPTION("NTFS 1.2/3.x driver - Copyright (c) 2001-2014 Anton Altaparmakov and Tuxera Inc.");
+MODULE_DESCRIPTION("NNTFS 0.1 driver - Copyright (c) 2020 Gordon(aka. Gao Zhi Gang)");
 MODULE_VERSION(NTFS_VERSION);
 MODULE_LICENSE("GPL");
 #ifdef DEBUG

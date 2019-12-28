@@ -6,12 +6,14 @@ ntfs-y := aops.o attrib.o collate.o compress.o debug.o file.o \
 	  mst.o runlist.o super.o sysctl.o \
 	  unistr.o upcase.o mft.o \
 	  inode.o ntfs_inode.o 
+
 # For Index Entry Handler
 ntfs-y += dir.o index.o index_root.o namei.o \
 	index_entry_create.o \
 	index_entry_delete.o
+
 # For compatition
-ntfs-y += compat.o
+ntfs-y += compat.o sys.o
 
 ntfs-$(CONFIG_NTFS_RW) += bitmap.o lcnalloc.o logfile.o quota.o usnjrnl.o
 

@@ -26,7 +26,7 @@ else
 fi
 
 mkdir -p /run/temp
-mount -t ntfs-gordon ntfs.img /run/temp -o loop
+mount ntfs.img /run/temp -o loop
 echo 1 > /proc/sys/fs/ntfs-debug
 ls /run/temp
 ######################
