@@ -30,6 +30,8 @@
 #include <linux/writeback.h>
 #include <linux/bit_spinlock.h>
 #include <linux/bio.h>
+#include <linux/compat.h>
+
 
 #include "aops.h"
 #include "attrib.h"

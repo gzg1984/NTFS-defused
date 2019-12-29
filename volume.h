@@ -26,6 +26,7 @@
 
 #include <linux/rwsem.h>
 #include <linux/uidgid.h>
+#include <linux/kobject.h>
 
 #include "types.h"
 #include "layout.h"
@@ -43,6 +44,8 @@ typedef struct {
 	 */
 	/* Device specifics. */
 	struct super_block *sb;		/* Pointer back to the super_block. */
+	struct kobject v_kobj;
+
 	LCN nr_blocks;			/* Number of sb->s_blocksize bytes
 					   sized blocks on the device. */
 	/* Configuration provided by user at mount time. */
