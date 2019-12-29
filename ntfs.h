@@ -160,5 +160,7 @@ static inline int ntfs_ffs(int x)
 	}
 	return r;
 }
+extern int __init next_g_sysfs_init(void);
+extern void next_g_sysfs_exit(void);
 
 #endif /* _LINUX_NTFS_H */

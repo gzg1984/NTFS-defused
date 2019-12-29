@@ -2,156 +2,142 @@
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
-#include <linux/cdev.h>
-#include <linux/platform_device.h>
 
-#define DRV_NAME "nolan"
-#define MY_MAJOR 50
-
-struct mydev {
-	unsigned long phy_iomem;
-	unsigned long phy_ioport;
-	unsigned long irq;
-	struct cdev mycdev;
+struct ext4_attr {
+	struct attribute attr;
+	short attr_id;
+	short attr_ptr;
+	union {
+		int offset;
+		void *explicit_ptr;
+	} u;
 };
 
-struct class *my_class;
 
-static int my_open(struct inode *inode, struct file *filp)
+typedef enum {
+	attr_noop,
+	attr_delayed_allocation_blocks,
+	attr_session_write_kbytes,
+	attr_lifetime_write_kbytes,
+	attr_reserved_clusters,
+	attr_inode_readahead,
+	attr_trigger_test_error,
+	attr_feature,
+	attr_pointer_ui,
+	attr_pointer_atomic,
+} attr_id_t;
+
+
+#define EXT4_ATTR(_name,_mode,_id)                                      \
+	static struct ext4_attr ext4_attr_##_name = {                           \
+		        .attr = {.name = __stringify(_name), .mode = _mode },           \
+		        .attr_id = attr_##_id,                                          \
+	}
+
+#define EXT4_ATTR_FUNC(_name,_mode)  EXT4_ATTR(_name,_mode,_name)
+
+EXT4_ATTR_FUNC(delayed_allocation_blocks, 0444);
+
+#define ATTR_LIST(name) &ext4_attr_##name.attr
+
+
+static struct attribute *ntfs_attrs[] = {
+	ATTR_LIST(delayed_allocation_blocks),
+	NULL,
+};
+
+
+static ssize_t ntfs_attr_show(struct kobject *kobj,
+			      struct attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "supported\n");
+	return 0;
+}
+
+static ssize_t ntfs_attr_store(struct kobject *kobj,
+			       struct attribute *attr,
+			       const char *buf, size_t len)
 {
 	return 0;
 }
 
-static int my_release(struct inode *inode, struct file *filp)
+static void ntfs_sb_release(struct kobject *kobj)
 {
-	return 0;
+	/*
+	struct ext4_sb_info *sbi = container_of(kobj, struct ext4_sb_info,
+						s_kobj);
+	complete(&sbi->s_kobj_unregister);
+	*/
 }
 
-static ssize_t my_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
-{
-	return count;
-}
-
-static ssize_t my_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
-{
-	return count;
-}
-
-static struct file_operations my_fops = {
-	.open = my_open,
-	.release = my_release,
-	.read = my_read,
-	.write = my_write,
-	.owner = THIS_MODULE,
+static const struct sysfs_ops ntfs_attr_ops = {
+	.show   = ntfs_attr_show,
+	.store  = ntfs_attr_store,
 };
 
-static int my_probe(struct platform_device *pdev)
-{
-	struct resource *res;
-	struct mydev *dev;
-	//struct class_device *class_dev;
-	struct device *class_dev;
+static struct kobj_type ntfs_sb_ktype = {
+	.default_attrs  = ntfs_attrs,
+	.sysfs_ops      = &ntfs_attr_ops,
+	.release        = ntfs_sb_release,
+};
 
-	dev_t devno;
+static struct kobj_type ntfs_ktype = {
+	.sysfs_ops      = &ntfs_attr_ops,
+};
+
+static struct kset ntfs_kset = {
+	.kobj   = {.ktype = &ntfs_ktype},
+};
+
+
+#define EXT4_ATTR_FEATURE(_name)   EXT4_ATTR(_name, 0444, feature)
+EXT4_ATTR_FEATURE(lazy_itable_init);
+
+
+static struct attribute *ntfs_feat_attrs[] = {
+	ATTR_LIST(lazy_itable_init),
+	NULL,
+};
+
+
+
+static struct kobj_type ntfs_feat_ktype = {
+	        .default_attrs  = ntfs_feat_attrs,
+		        .sysfs_ops      = &ntfs_attr_ops,
+};
+
+static struct kobject ntfs_feat = {
+	        .kset   = &ntfs_kset,
+};
+
+extern int next_g_sysfs_init(void)
+{
 	int ret;
-	
-	printk("Probe pdev->name: %s ; pdev->id: %d\n", pdev->name, pdev->id);
-	dev = (struct mydev *)kmalloc(sizeof(*dev), GFP_KERNEL);
-	if (NULL == dev)
-		return -ENOMEM;
+	kobject_set_name(&ntfs_kset.kobj, "ntfs");
+	ntfs_kset.kobj.parent = fs_kobj;
 
-	/* get iomem address */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	dev->phy_iomem = res->start;
-	printk("Phy iomem = 0x%lx\n", dev->phy_iomem);
+	ret = kset_register(&ntfs_kset);
+	if (ret)
+		return ret;
 
-	/* get ioport address */
-	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
-	dev->phy_ioport = res->start;
-	printk("Phy ioport = 0x%lx\n", dev->phy_ioport);
-
-	/* get irq */
-	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	dev->irq = res->start;
-	printk("Phy irq = 0x%lx\n", dev->irq);
-
-	/* request char region */
-	devno = MKDEV(MY_MAJOR, pdev->id);
-	ret = register_chrdev_region(devno, 1, "SKEL_CHAR");
-	if (ret) {
-		kfree(dev);
+	ret = kobject_init_and_add(&ntfs_feat, &ntfs_feat_ktype,
+			NULL, "features");
+	if (ret)
+	{
+		kset_unregister(&ntfs_kset);
 		return -1;
 	}
-
-	/* add cdev */
-	cdev_init(&dev->mycdev, &my_fops);
-	dev->mycdev.owner = THIS_MODULE;
-	cdev_add(&dev->mycdev, devno, 1);
-
-	/* create /sys/class/xxx */
-
-
-	class_dev = device_create(my_class, /* class */
-			NULL, /* parent */
-			devno, /* dev_t */
-			&pdev->dev, /* device* */
-			"shrek-%d", pdev->id); /* name */
-			/*
-	if (IS_ERR(class_dev)) {
-		printk("Cannot create /sys/class/xxx\n");
-		cdev_del(&dev->mycdev);
-		unregister_chrdev_region(devno, 1);
-		kfree(dev);
-		return PTR_ERR(class_dev);
+	else
+	{
+		return 0;
 	}
-
-*/
-	/* save dev to pdev */
-	platform_set_drvdata(pdev, dev);
-
-	return 0;
 }
 
-static int  my_remove(struct platform_device *pdev)
+extern void next_g_sysfs_exit(void)
 {
-	struct mydev *dev = platform_get_drvdata(pdev);
-	dev_t devno = MKDEV(MY_MAJOR, pdev->id);
-
-	printk("Remove pdev->name: %s ; pdev->id: %d\n", pdev->name, pdev->id);
-
-	//class_device_destroy(my_class, devno);
-	device_destroy(my_class, devno);
-
-	cdev_del(&dev->mycdev);
-	unregister_chrdev_region(devno, 1);
-	kfree(dev);
-
-	platform_set_drvdata(pdev, NULL);
-	return 0;
-}
-
-static struct platform_driver my_drv = {
-	.probe = my_probe,
-	.remove = my_remove,
-	.driver = {
-		.name = DRV_NAME,
-		.owner = THIS_MODULE,
-	},
-};
-
-extern int sys_init(void)
-{
-	my_class = class_create(THIS_MODULE, "uplooking");
-	if (IS_ERR(my_class))
-		return PTR_ERR(my_class);
-
-	return platform_driver_register(&my_drv);
-}
-
-extern void sys_exit(void)
-{
-	platform_driver_unregister(&my_drv);
-	class_destroy(my_class);
+	kobject_put(&ntfs_feat);
+	kset_unregister(&ntfs_kset);
+	return;
 }
 
 

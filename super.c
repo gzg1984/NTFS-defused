@@ -3070,9 +3070,6 @@ static const char ntfs_inode_cache_name[] = "ntfs_inode_cache";
 static const char ntfs_big_inode_cache_name[] = "ntfs_big_inode_cache";
 
 
-extern int sys_init(void);
-extern int sys_exit(void);
-
 #include <linux/version.h>
 static int __init init_ntfs_fs(void)
 {
@@ -3152,7 +3149,7 @@ static int __init init_ntfs_fs(void)
 		goto regfs_err_out;
 	}
 	ntfs_debug("NTFS driver registered successfully.");
-	sys_init();
+	next_g_sysfs_init();
 	return 0; /* Success! */
 
 regfs_err_out:
@@ -3179,7 +3176,7 @@ ictx_err_out:
 static void __exit exit_ntfs_fs(void)
 {
 	ntfs_debug("Unregistering NTFS driver.\n");
-	sys_exit();
+	next_g_sysfs_exit();
 
 	unregister_filesystem(&nntfs_fs_type);
 

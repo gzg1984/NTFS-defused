@@ -13,11 +13,11 @@ ntfs-y += dir.o index.o index_root.o namei.o \
 	index_entry_delete.o
 
 # For compatition
-ntfs-y += compat.o sys.o
+ntfs-y += compat.o sysfs.o
 
 ntfs-$(CONFIG_NTFS_RW) += bitmap.o lcnalloc.o logfile.o quota.o usnjrnl.o
 
-ccflags-y := -DNTFS_VERSION=\"2.1.33\"
+ccflags-y := -DNTFS_VERSION=\"3.0.0\"
 ccflags-$(CONFIG_NTFS_DEBUG)	+= -DDEBUG
 ccflags-$(CONFIG_NTFS_RW)	+= -DNTFS_RW
 else
