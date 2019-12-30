@@ -17,3 +17,35 @@ mount -t nntfs <the disk> <the folder>
 
 # About the NTFS datasheet
 - https://flatcap.github.io/linux-ntfs/ntfs/
+
+# User Interfaces
+## Debug Mode
+### Enable Debug Mode
+- via proc
+```
+echo 1 > /proc/sys/fs/ntfs-debug
+```
+- via sysfs
+```
+echo 1 > /sys/fs/ntfs/features/debug_enabled 
+```
+### Disable Debug Mode
+- via proc
+```
+echo 0 > /proc/sys/fs/ntfs-debug
+```
+- via sysfs
+```
+echo 0 > /sys/fs/ntfs/features/debug_enabled 
+```
+### Query Debug Mode
+- via proc
+```
+cat /proc/sys/fs/ntfs-debug
+```
+- via sysfs
+```
+cat /sys/fs/ntfs/features/debug_enabled 
+```
+## Volume MFT info
+### TODO
