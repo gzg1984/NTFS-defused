@@ -2,49 +2,19 @@
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
-
+#include "sysfs.h"
 #include "../volume.h"
 
-struct ext4_attr {
-	struct attribute attr;
-	short attr_id;
-	short attr_ptr;
-	union {
-		int offset;
-		void *explicit_ptr;
-	} u;
-};
 
+#define EXT4_ATTR_FUNC(_name,_mode)  NTFS_ATTR(_name,_mode,_name)
 
-typedef enum {
-	attr_noop,
-	attr_delayed_allocation_blocks,
-	attr_session_write_kbytes,
-	attr_lifetime_write_kbytes,
-	attr_reserved_clusters,
-	attr_inode_readahead,
-	attr_trigger_test_error,
-	attr_feature,
-	attr_pointer_ui,
-	attr_pointer_atomic,
-} attr_id_t;
+EXT4_ATTR_FUNC(map_ino, 0444);
 
-
-#define EXT4_ATTR(_name,_mode,_id)                                      \
-	static struct ext4_attr ext4_attr_##_name = {                           \
-		        .attr = {.name = __stringify(_name), .mode = _mode },           \
-		        .attr_id = attr_##_id,                                          \
-	}
-
-#define EXT4_ATTR_FUNC(_name,_mode)  EXT4_ATTR(_name,_mode,_name)
-
-EXT4_ATTR_FUNC(delayed_allocation_blocks, 0444);
-
-#define ATTR_LIST(name) &ext4_attr_##name.attr
+#define ATTR_LIST(name) &ntfs_attr_##name.attr
 
 
 static struct attribute *ntfs_attrs[] = {
-	ATTR_LIST(delayed_allocation_blocks),
+	ATTR_LIST(map_ino),
 	NULL,
 };
 
@@ -52,8 +22,11 @@ static struct attribute *ntfs_attrs[] = {
 static ssize_t ntfs_attr_show(struct kobject *kobj,
 			      struct attribute *attr, char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "supported\n");
-	return 0;
+	ntfs_volume *nv = container_of(kobj,  ntfs_volume,v_kobj);
+    struct ntfs_attr *a = container_of(attr, struct ntfs_attr, attr);
+
+	return snprintf(buf, PAGE_SIZE, "%s+%s+%ld+%ld\n",
+		kobj->name,attr->name,nv->mftbmp_ino->i_ino,nv->mft_ino->i_ino);
 }
 
 static ssize_t ntfs_attr_store(struct kobject *kobj,
@@ -83,44 +56,27 @@ static struct kobj_type ntfs_sb_ktype = {
 	.release        = ntfs_sb_release,
 };
 
-static struct kobj_type ntfs_ktype = {
-	.sysfs_ops      = &ntfs_attr_ops,
-};
-
-static struct kset ntfs_kset = {
-	.kobj   = {.ktype = &ntfs_ktype},
-};
-
-
-#define EXT4_ATTR_FEATURE(_name)   EXT4_ATTR(_name, 0444, feature)
-EXT4_ATTR_FEATURE(lazy_itable_init);
-
-
-static struct attribute *ntfs_feat_attrs[] = {
-	ATTR_LIST(lazy_itable_init),
-	NULL,
-};
-
-
-
-static struct kobj_type ntfs_feat_ktype = {
-	        .default_attrs  = ntfs_feat_attrs,
-		        .sysfs_ops      = &ntfs_attr_ops,
-};
-
-static struct kobject ntfs_feat = {
-	        .kset   = &ntfs_kset,
-};
-
 int ntfs_register_volume_sysfs(ntfs_volume *nv)
 {       
 	int err;
 
-	struct kobject* p=&nv->v_kobj;
+	struct kobject* p=&(nv->v_kobj);
 
-	p->kset = &ntfs_kset;
-	err = kobject_init_and_add(p, &ntfs_sb_ktype, NULL,
+	p->kset = &ntfs_top;
+	if (nv && nv->sb && nv->sb->s_id)
+	{
+		err = kobject_init_and_add(p, &ntfs_sb_ktype, NULL,
 			"%s", nv->sb->s_id);
+	}
+	else
+	{
+		
+		err = kobject_init_and_add(p, &ntfs_sb_ktype, NULL,
+			"unknown");
+	
+	}
+	
+
 	if (err)
 		return err;
 

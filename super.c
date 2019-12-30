@@ -2251,6 +2251,7 @@ static void ntfs_put_super(struct super_block *sb)
 	ntfs_volume *vol = NTFS_SB(sb);
 
 	ntfs_debug("Entering.");
+	ntfs_unregister_volume_sysfs(vol);
 
 #ifdef NTFS_RW
 	/*
@@ -2910,6 +2911,7 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 		mutex_unlock(&ntfs_lock);
 		sb->s_export_op = &ntfs_export_ops;
 		lockdep_on();
+		ntfs_register_volume_sysfs(vol);
 		return 0;
 	}
 	ntfs_error(sb, "Failed to allocate root directory.");

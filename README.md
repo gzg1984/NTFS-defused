@@ -48,4 +48,7 @@ cat /proc/sys/fs/ntfs-debug
 cat /sys/fs/ntfs/features/debug_enabled 
 ```
 ## Volume MFT info
-### TODO
+### Query The Super Block MFT INFO
+```
+cat /sys/fs/ntfs/loop0/map_ino 
+```

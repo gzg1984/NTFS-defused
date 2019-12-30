@@ -60,21 +60,23 @@ static struct kobj_type ntfs_feat_ktype = {
 	.sysfs_ops      = &ntfs_attr_ops,
 };
 
-static struct kset ntfs_kset = {
-	.kobj   = {.ktype = &ntfs_feat_ktype },
+static struct kobj_type _no_attr_at_top={};
+
+struct kset ntfs_top = {
+	.kobj   = {.ktype = &_no_attr_at_top },
 };
 
 static struct kobject ntfs_feat = {
-	.kset   = &ntfs_kset,
+	.kset   = &ntfs_top,
 };
 
 extern int next_g_sysfs_init(void)
 {
 	int ret;
-	kobject_set_name(&ntfs_kset.kobj, "ntfs");
-	ntfs_kset.kobj.parent = fs_kobj;
+	kobject_set_name(&ntfs_top.kobj, "ntfs");
+	ntfs_top.kobj.parent = fs_kobj;
 
-	ret = kset_register(&ntfs_kset);
+	ret = kset_register(&ntfs_top);
 	if (ret)
 		return ret;
 
@@ -82,7 +84,7 @@ extern int next_g_sysfs_init(void)
 			NULL, "features");
 	if (ret)
 	{
-		kset_unregister(&ntfs_kset);
+		kset_unregister(&ntfs_top);
 		return -1;
 	}
 	else
@@ -94,7 +96,7 @@ extern int next_g_sysfs_init(void)
 extern void next_g_sysfs_exit(void)
 {
 	kobject_put(&ntfs_feat);
-	kset_unregister(&ntfs_kset);
+	kset_unregister(&ntfs_top);
 	return;
 }
 

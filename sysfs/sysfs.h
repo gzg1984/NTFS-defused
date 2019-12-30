@@ -20,7 +20,15 @@ struct ntfs_attr {
 typedef enum {
 	attr_noop,
 	e_attr_feature,
-} attr_id_t;
+} feature_attr_id_t;
 
 
+
+typedef enum {
+	e_attr_map_ino = 1 ,
+	e_attr_ino,
+} volume_attr_id_t;
+
+
+extern struct kset ntfs_top;
 #endif

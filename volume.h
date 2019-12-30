@@ -178,4 +178,11 @@ DEFINE_NVOL_BIT_OPS(QuotaOutOfDate)
 DEFINE_NVOL_BIT_OPS(UsnJrnlStamped)
 DEFINE_NVOL_BIT_OPS(SparseEnabled)
 
+
+
+int ntfs_register_volume_sysfs(ntfs_volume *nv);
+void ntfs_unregister_volume_sysfs(ntfs_volume *nv);
+
+
+
 #endif /* _LINUX_NTFS_VOLUME_H */
