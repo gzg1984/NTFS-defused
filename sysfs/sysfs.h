@@ -1,5 +1,7 @@
 #ifndef __SYSFS_H__
 #define __SYSFS_H__
+#include "../ntfs_inode.h"
+
 struct ntfs_attr {
 	struct attribute attr;
 	short attr_id;
@@ -22,12 +24,8 @@ typedef enum {
 	e_attr_feature,
 } feature_attr_id_t;
 
-
-
-typedef enum {
-	e_attr_map_ino = 1 ,
-	e_attr_ino,
-} volume_attr_id_t;
+extern int ntfs_register_ntfs_inode_sysfs(struct inode *vi);
+extern void ntfs_unregister_ntfs_inode_sysfs(struct inode *vi);
 
 
 extern struct kset ntfs_top;

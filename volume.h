@@ -44,23 +44,24 @@ typedef struct {
 	 */
 	/* Device specifics. */
 	struct super_block *sb;		/* Pointer back to the super_block. */
-	struct kobject v_kobj;
+	struct kset v_kset;
 
-	LCN nr_blocks;			/* Number of sb->s_blocksize bytes
-					   sized blocks on the device. */
+	LCN nr_blocks;		/* Number of sb->s_blocksize bytes
+					   	sized blocks on the device. */
 	/* Configuration provided by user at mount time. */
-	unsigned long flags;		/* Miscellaneous flags, see below. */
+	unsigned long flags;/* Miscellaneous flags, see below. */
 	kuid_t uid;			/* uid that files will be mounted as. */
 	kgid_t gid;			/* gid that files will be mounted as. */
-	umode_t fmask;			/* The mask for file permissions. */
-	umode_t dmask;			/* The mask for directory
+	umode_t fmask;		/* The mask for file permissions. */
+	umode_t dmask;		/* The mask for directory
 					   permissions. */
-	u8 mft_zone_multiplier;		/* Initial mft zone multiplier. */
+	u8 mft_zone_multiplier;	/* Initial mft zone multiplier. */
 	u8 on_errors;			/* What to do on filesystem errors. */
+	
 	/* NTFS bootsector provided information. */
-	u16 sector_size;		/* in bytes */
+	u16 sector_size;			/* in bytes */
 	u8 sector_size_bits;		/* log2(sector_size) */
-	u32 cluster_size;		/* in bytes */
+	u32 cluster_size;			/* in bytes */
 	u32 cluster_size_mask;		/* cluster_size - 1 */
 	u8 cluster_size_bits;		/* log2(cluster_size) */
 	u32 mft_record_size;		/* in bytes */

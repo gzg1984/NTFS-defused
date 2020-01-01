@@ -41,6 +41,8 @@
 #include "mft.h"
 #include "time.h"
 #include "ntfs.h"
+#include "sysfs/sysfs.h"
+
 
 /**
  * ntfs_test_inode - compare two (possibly fake) inodes for equality
@@ -248,6 +250,12 @@ struct inode *ntfs_iget(struct super_block *sb, unsigned long mft_no)
 		iput(vi);
 		vi = ERR_PTR(err);
 	}
+	/*
+	if (!err)
+	{
+		ntfs_register_ntfs_inode_sysfs(vol->root_ino);
+	}*/
+
 	return vi;
 }
 
@@ -2410,6 +2418,7 @@ void ntfs_clear_extent_inode(ntfs_inode *ni)
 void ntfs_evict_big_inode(struct inode *vi)
 {
 	ntfs_inode *ni = NTFS_I(vi);
+	//ntfs_unregister_ntfs_inode_sysfs(ni);
 
 	truncate_inode_pages_final(&vi->i_data);
 	clear_inode(vi);

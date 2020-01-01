@@ -13,7 +13,11 @@ ntfs-y += dir.o index.o index_root.o namei.o \
 	index_entry_delete.o
 
 # For compatition
-ntfs-y += compat.o sysfs/features.o sysfs/volumes.o
+ntfs-y += compat.o
+
+# For sysfs interface
+ntfs-y +=  sysfs/features.o sysfs/volumes.o sysfs/big_ntfs_inode.o
+
 
 ntfs-$(CONFIG_NTFS_RW) += bitmap.o lcnalloc.o logfile.o quota.o usnjrnl.o
 

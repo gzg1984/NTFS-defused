@@ -21,6 +21,7 @@
 
 #ifndef _NTFS_INODE_H_
 #define _NTFS_INODE_H_
+#include "runlist.h"
 
 typedef struct _ntfs_inode ntfs_inode;
 #define ntfs_debug_ntfs_inode(ni) do {\
@@ -229,6 +230,7 @@ NINO_FNS(TruncateFailed)
  */
 typedef struct {
 	ntfs_inode ntfs_inode;
+	struct kobject bni_kobj;
 	struct inode vfs_inode;		/* The vfs inode structure. */
 } big_ntfs_inode;
 
