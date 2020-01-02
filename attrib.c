@@ -622,9 +622,6 @@ static int ntfs_attr_find(const ATTR_TYPE type, const ntfschar *name,
 			break;
 		}
 		ctx->attr = a;
-		/* If we want to list every attr 
-		 */
-		debug_show_attr(ctx->attr);
 		if (unlikely(le32_to_cpu(a->type) > le32_to_cpu(type)))
 		{
 			ntfs_debug("Current Attr [%s]should be later than what we want[%s], quit\n",
