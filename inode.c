@@ -2574,7 +2574,6 @@ int ntfs_transfer_ia_pos_to_address(struct inode* vdir,u8* paget_map_kaddr,s64 i
 	}
 	return 0;
 }
-#ifdef NTFS_RW
 
 static const char *es = "  Leaving inconsistent metadata.  Unmount and run "
 		"chkdsk.";
@@ -3354,5 +3353,3 @@ err_out:
 	}
 	return err;
 }
-
-#endif /* NTFS_RW */

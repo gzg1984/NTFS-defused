@@ -119,7 +119,7 @@ static ssize_t ntfs_attr_show(struct kobject *kobj,
 
 	big_ntfs_inode* bni=container_of(kobj, big_ntfs_inode,bni_kobj);
 	ntfs_inode *ni = &(bni->ntfs_inode);
-	struct inode *vi = &(bni->vfs_inode);
+	//struct inode *vi = &(bni->vfs_inode);
 
 
 	if(!strcmp(attr->name,"AT_INDEX_ROOT"))
