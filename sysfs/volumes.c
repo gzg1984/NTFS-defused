@@ -42,7 +42,7 @@ static ssize_t ntfs_attr_show(struct kobject *kobj,
 {
 	struct kset* ns=container_of(kobj, struct kset,kobj);
 	ntfs_volume *nv = container_of(ns,  ntfs_volume,v_kset);
-    struct ntfs_attr *a = container_of(attr, struct ntfs_attr, attr);
+	//struct ntfs_attr *a = container_of(attr, struct ntfs_attr, attr);
 
 	if(!strcmp(attr->name,"volume_mft"))
 	{

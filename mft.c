@@ -1,8 +1,7 @@
 /**
- * mft.c - NTFS kernel mft record operations. Part of the Linux-NTFS project.
+ * mft.c - NTFS kernel mft record operations. Part of the Linux-NTFS-defused project.
  *
- * Copyright (c) 2001-2012 Anton Altaparmakov and Tuxera Inc.
- * Copyright (c) 2002 Richard Russon
+ * Copyright (c) 2020 Gordon (aka. Gao Zhi Gang aka. gzg1984@gmail.com)
  *
  * This program/include file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as published
@@ -25,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/swap.h>
 #include <linux/bio.h>
+#include <linux/mm.h>
 
 #include "attrib.h"
 #include "aops.h"
@@ -36,6 +36,55 @@
 #include "mft.h"
 #include "ntfs.h"
 
+static inline unsigned long get_ntfs_inode_mft_real_offset(ntfs_inode *ni)
+{
+	return ((u64)ni->mft_no << ni->vol->mft_record_size_bits);
+}
+static inline unsigned long get_ntfs_inode_mft_start_page(ntfs_inode *ni)
+{
+	return get_ntfs_inode_mft_real_offset(ni) >> PAGE_SHIFT;
+}
+
+static int check_size_in_page_bug(loff_t inode_size,loff_t real_start,size_t mft_size)
+{
+	int inode_end_offset=offset_in_page(inode_size) ;
+	int mft_start_ofs = offset_in_page(real_start);
+	int mft_end_offset = mft_start_ofs + mft_size;
+	if (inode_end_offset < mft_end_offset)
+	{
+		return -1;
+	}
+	return 0;
+}
+/* If the wanted index is out of bounds the mft record doesn't exist. */
+static int check_size_bug(ntfs_inode *ni)
+{
+	loff_t i_size;
+	unsigned long page_index, end_index;
+	unsigned ofs;
+	ntfs_volume *vol = ni->vol;
+	struct inode *mft_vi = vol->mft_ino;
+
+	page_index = get_ntfs_inode_mft_start_page(ni);
+	ofs = offset_in_page(get_ntfs_inode_mft_real_offset(ni));
+
+	i_size = i_size_read(mft_vi);
+	/* The maximum valid page_index into the page cache for $MFT's data. */
+	end_index = i_size >> PAGE_SHIFT;
+
+	/* If the wanted index is out of bounds the mft record doesn't exist. */
+	if (unlikely(page_index >= end_index)) {
+		if (page_index > end_index || 
+			check_size_in_page_bug(i_size,get_ntfs_inode_mft_real_offset(ni),vol->mft_record_size)) {
+			ntfs_error(vol->sb, "Attempt to read mft record 0x%lx, "
+					"which is beyond the end of the mft.  "
+					"This is probably a bug in the ntfs "
+					"driver.", ni->mft_no);
+			return -1;
+		}
+	}
+	return 0;
+}
 /**
  * map_mft_record_page - map the page in which a specific mft record resides
  * @ni:		ntfs inode whose mft record page to map
@@ -48,17 +97,15 @@
  */
 static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 {
-	loff_t i_size;
 	ntfs_volume *vol = ni->vol;
 	struct inode *mft_vi = vol->mft_ino;
 	struct page *page;
-	unsigned long index, end_index;
+	unsigned long page_index;
 	unsigned ofs;
 
 	BUG_ON(ni->page);
 	ntfs_debug("[%s]Entering for mft_no 0x%lx.",
 			current->comm, ni->mft_no);
-	ntfs_debug_ntfs_inode(ni);
 
 	/*
 	 * The index into the page cache and the offset within the page cache
@@ -66,36 +113,26 @@ static inline MFT_RECORD *map_mft_record_page(ntfs_inode *ni)
 	 * overflowing the unsigned long, but I don't think we would ever get
 	 * here if the volume was that big...
 	 */
-	index = (u64)ni->mft_no << vol->mft_record_size_bits >>
-			PAGE_SHIFT;
-	ofs = offset_in_page((ni->mft_no << vol->mft_record_size_bits));
-
-	i_size = i_size_read(mft_vi);
-	/* The maximum valid index into the page cache for $MFT's data. */
-	end_index = i_size >> PAGE_SHIFT;
+	page_index = get_ntfs_inode_mft_start_page(ni);
+	ofs = offset_in_page(get_ntfs_inode_mft_real_offset(ni));
 
 	/* If the wanted index is out of bounds the mft record doesn't exist. */
-	if (unlikely(index >= end_index)) {
-		if (index > end_index || offset_in_page(i_size) < ofs +
-				vol->mft_record_size) {
-			page = ERR_PTR(-ENOENT);
-			ntfs_error(vol->sb, "Attempt to read mft record 0x%lx, "
-					"which is beyond the end of the mft.  "
-					"This is probably a bug in the ntfs "
-					"driver.", ni->mft_no);
-			goto err_out;
-		}
+	if(check_size_bug(ni))
+	{
+		page = ERR_PTR(-ENOENT);
+		goto err_out;
 	}
-	ntfs_debug("[%s]Before ntfs_map_page 0x%lx.\n", current->comm, index);
+
 	/* Read, map, and pin the page. */
-	page = ntfs_map_page(mft_vi->i_mapping, index);
+	page = ntfs_map_page(mft_vi->i_mapping, page_index);
 	if (likely(!IS_ERR(page))) {
 		/* Catch multi sector transfer fixup errors. */
-		if (likely(ntfs_is_mft_recordp((le32*)(page_address(page) +
-				ofs)))) {
+		MFT_RECORD* to_return = page_address(page) + ofs;
+		/* check the result->magic */
+		if (likely(ntfs_is_mft_recordp((le32*)to_return)) ) {
 			ni->page = page;
 			ni->page_ofs = ofs;
-			return page_address(page) + ofs;
+			return to_return;
 		}
 		ntfs_error(vol->sb, "Mft record 0x%lx is corrupt.  "
 				"Run chkdsk.\n", ni->mft_no);
@@ -172,8 +209,6 @@ MFT_RECORD *map_mft_record(ntfs_inode *ni)
 
 	/* Serialize access to this mft record. */
 	mutex_lock(&ni->mrec_lock);
-
-	ntfs_debug_ntfs_inode(ni);
 	m = map_mft_record_page(ni);
 	if (likely(!IS_ERR(m)))
 	{
@@ -1023,7 +1058,6 @@ bool ntfs_may_write_mft_record(ntfs_volume *vol, const unsigned long mft_no,
 		if (NInoDirty(ni)) {
 			ntfs_debug("mft_no 0x%lx is dirty, do not write it. will put it and return false",
 					mft_no);
-			ntfs_debug_ntfs_inode(ni);
 			atomic_dec(&ni->count);
 			iput(vi);
 			ntfs_debug("Done with Dirty Inode, return False.");

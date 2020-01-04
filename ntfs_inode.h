@@ -24,10 +24,6 @@
 #include "runlist.h"
 
 typedef struct _ntfs_inode ntfs_inode;
-#define ntfs_debug_ntfs_inode(ni) do {\
-/*	ntfs_debug("NTFS ATTRIBUTE [%s]", get_attribute_type_name(ni->type)); \
-	ntfs_debug("NTFS INODE COUNT [%d]", atomic_read(&ni->count)); */ } while(0);
-
 
 /*
  * The NTFS in-memory inode structure. It is just used as an extension to the

@@ -13,12 +13,18 @@
 #define ATTR_LIST(name) &ntfs_attr_##name.attr
 
 typedef enum {
+	e_attr_type,
+	e_attr_count,
 	e_attr_AT_INDEX_ROOT = AT_INDEX_ROOT ,
 } mft_attr_id_t;
 
+NTFS_ATTR_FUNC(type, 0444);
+NTFS_ATTR_FUNC(count, 0444);
 NTFS_ATTR_FUNC(AT_INDEX_ROOT, 0444);
 
 static struct attribute *ntfs_attrs[] = {
+	ATTR_LIST(type),
+	ATTR_LIST(count),
 	ATTR_LIST(AT_INDEX_ROOT),
 	NULL,
 };
@@ -134,6 +140,14 @@ static ssize_t ntfs_attr_show(struct kobject *kobj,
 		}
 
 		return snprintf(buf, PAGE_SIZE,"%s\n",buf);
+	}
+	else if(!strcmp(attr->name,"type"))
+	{
+		return snprintf(buf, PAGE_SIZE,"%s\n",attr_type_string(ni->type));
+	}
+	else if(!strcmp(attr->name,"count"))
+	{
+		return snprintf(buf, PAGE_SIZE,"%d\n",atomic_read(&ni->count));
 	}
 	else
 	{
