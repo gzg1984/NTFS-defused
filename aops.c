@@ -41,6 +41,7 @@
 #include "runlist.h"
 #include "types.h"
 #include "ntfs.h"
+#include "compat.h"
 
 
 int ntfs_grab_one_cache_page(struct address_space *mapping,pgoff_t index,
@@ -84,7 +85,7 @@ int __ntfs_grab_cache_pages(struct address_space *mapping,
 	BUG_ON(!nr_pages);
 	err = nr = 0;
 	do {
-		pages[nr] = find_get_page_flags(mapping, index, FGP_LOCK |
+		pages[nr] = ntfs_find_get_page_flags(mapping, index, FGP_LOCK |
 				FGP_ACCESSED);
 		if (!pages[nr]) {
 			if (!*cached_page) {
@@ -1450,7 +1451,7 @@ retry_writepage:
 		 * The page may have dirty, unmapped buffers.  Make them
 		 * freeable here, so the page does not leak.
 		 */
-		block_invalidatepage(page, 0, PAGE_SIZE);
+		ntfs_block_invalidatepage(page, 0, PAGE_SIZE);
 		unlock_page(page);
 		ntfs_debug("Write outside i_size - truncated?");
 		return 0;

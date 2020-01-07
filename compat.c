@@ -8,7 +8,6 @@
 #include <linux/writeback.h>
 #include <linux/bit_spinlock.h>
 #include <linux/bio.h>
-#include <linux/version.h>
 #include "compat.h"
 
 #define _FORCE_CHOOSEN_ 1
@@ -64,3 +63,20 @@ extern ssize_t ntfs_write_iocb(struct kiocb *iocb, ssize_t written)
 
 }
 
+void ntfs_block_invalidatepage(struct page *page, unsigned int offset, unsigned int length)
+{
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))||(_FORCE_CHOOSEN_==1)
+	block_invalidatepage(page, offset,length);
+#else
+	block_invalidatepage_range(page, offset, length);
+#endif
+}
+
+struct page *ntfs_find_get_page_flags(struct address_space *mapping, pgoff_t offset, int fgp_flags)
+{
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))||(_FORCE_CHOOSEN_==1)
+	return find_get_page_flags(mapping, offset, fgp_flags);
+#else
+	return find_get_page(mapping, offset);
+#endif
+}

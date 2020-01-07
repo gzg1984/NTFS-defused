@@ -37,6 +37,7 @@
 
 #include <asm/page.h>
 #include <linux/uaccess.h>
+#include <linux/aio.h>
 
 #include "attrib.h"
 #include "bitmap.h"
