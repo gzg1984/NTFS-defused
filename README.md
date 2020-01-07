@@ -1,19 +1,11 @@
 # nntfs(aka. NTFS-defused)
 # About the name
-nntfs is "NOT EXACTLY"  a NTFS fs driver
-nntfs is "NOT ONLY" a NTFS fs driver
+nntfs is "Not exactly"  a NTFS fs driver
+nntfs is "Not only" a NTFS fs driver
 nntfs is a "New" NTFS fs driver
 
 # About the Author
 a kernel developer
-
-# How To use it
-```
-mount -t nntfs <the disk> <the folder>
-```
-
-# About the New feature aside of the NTFS itself
-- A sys entry to show the MFT data struct
 
 # About the NTFS datasheet
 - https://flatcap.github.io/linux-ntfs/ntfs/
@@ -58,4 +50,10 @@ cat /sys/fs/ntfs/loop0/map_ino
 ```
 TYPE=`cat /sys/fs/ntfs/features/mount_type`
 mount -t ${TYPE} /dev/sdN /mnt
+```
+
+# Scripts
+## The simplest mount test script
+```
+./LoadModule.sh
 ```
