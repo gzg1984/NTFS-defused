@@ -124,7 +124,7 @@ typedef struct {
 					   only, otherwise NULL). */
 	struct inode *extend_ino;	/* The VFS inode of $Extend (NTFS3.0+
 					   only, otherwise NULL). */
-#ifdef NTFS_RW
+
 	/* $Quota stuff is NTFS3.0+ specific.  Unused/NULL otherwise. */
 	struct inode *quota_ino;	/* The VFS inode of $Quota. */
 	struct inode *quota_q_ino;	/* Attribute inode for $Quota/$Q. */
@@ -132,7 +132,7 @@ typedef struct {
 	struct inode *usnjrnl_ino;	/* The VFS inode of $UsnJrnl. */
 	struct inode *usnjrnl_max_ino;	/* Attribute inode for $UsnJrnl/$Max. */
 	struct inode *usnjrnl_j_ino;	/* Attribute inode for $UsnJrnl/$J. */
-#endif /* NTFS_RW */
+
 	struct nls_table *nls_map;
 } ntfs_volume;
 

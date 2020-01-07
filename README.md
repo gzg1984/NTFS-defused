@@ -52,3 +52,10 @@ cat /sys/fs/ntfs/features/debug_enabled
 ```
 cat /sys/fs/ntfs/loop0/map_ino 
 ```
+## Mount Option
+### File system type
+- To avoid the confliction with kernel ntfs driver and ntfs-3g driver, you can specified the FS type according to the sysfs interface
+```
+TYPE=`cat /sys/fs/ntfs/features/mount_type`
+mount -t ${TYPE} /dev/sdN /mnt
+```

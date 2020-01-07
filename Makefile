@@ -21,7 +21,7 @@ ntfs-y +=  sysfs/features.o sysfs/volumes.o sysfs/big_ntfs_inode.o
 
 ntfs-$(CONFIG_NTFS_RW) += bitmap.o lcnalloc.o logfile.o quota.o usnjrnl.o
 
-ccflags-y := -DNTFS_VERSION=\"3.0.0\"
+ccflags-y := -DNTFS_VERSION=\"4.13\"
 ccflags-$(CONFIG_NTFS_DEBUG)	+= -DDEBUG
 ccflags-$(CONFIG_NTFS_RW)	+= -DNTFS_RW
 else

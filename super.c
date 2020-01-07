@@ -2252,6 +2252,7 @@ static void ntfs_put_super(struct super_block *sb)
 	ntfs_volume *vol = NTFS_SB(sb);
 
 	ntfs_debug("Entering.");
+	ntfs_unregister_ntfs_inode_sysfs(vol->mft_ino);
 	ntfs_unregister_ntfs_inode_sysfs(vol->root_ino);
 	ntfs_unregister_volume_sysfs(vol);
 
@@ -2680,8 +2681,95 @@ static const struct super_operations ntfs_sops = {
 						   proc. */
 };
 
+/* We support sector sizes up to the PAGE_SIZE.
+ * @sb:	the superblock
+ * return 0 means pass the test otherwise not */
+static int check_block_size(struct super_block* sb)
+{
+	int blocksize = 0;
+	struct buffer_head *bh = NULL;
+	int result = 0;
+
+	ntfs_volume *vol = NTFS_SB(sb);
+
+	int logic_block_size = bdev_logical_block_size(sb->s_bdev);
+	if ( logic_block_size> PAGE_SIZE) {
+		ntfs_error(sb, "Device has unsupported sector size "
+					"(%i).  The maximum supported sector "
+					"size on this architecture is %lu "
+					"bytes.",
+					logic_block_size,PAGE_SIZE);
+		return -1;
+	}
+	
+	/*
+	 * Setup the device access block size to NTFS_BLOCK_SIZE or the hard
+	 * sector size, whichever is bigger.
+	 */
+	blocksize = sb_min_blocksize(sb, NTFS_BLOCK_SIZE);
+	if (blocksize < NTFS_BLOCK_SIZE) {
+		ntfs_error(sb, "Unable to set device block size.");
+		return -1;
+	}
+	BUG_ON(blocksize != sb->s_blocksize);
+	ntfs_debug("Set device block size to %i bytes (block size bits %i).",
+			blocksize, sb->s_blocksize_bits);
+	/* Determine the size of the device in units of block_size bytes. */
+	if (!i_size_read(sb->s_bdev->bd_inode)) {
+		ntfs_error(sb, "Unable to determine device size.");
+		return -1;
+	}
+	vol->nr_blocks = i_size_read(sb->s_bdev->bd_inode) >>
+			sb->s_blocksize_bits;
+	/* Read the boot sector and return unlocked buffer head to it. */
+	if (!(bh = read_ntfs_boot_sector(sb, 0 /* always not silence because we are free!! */))) {
+		ntfs_error(sb, "Not an NTFS volume.");
+		return -1;
+	}
+	/*
+	 * Extract the data from the boot sector and setup the ntfs volume
+	 * using it.
+	 */
+	result = parse_ntfs_boot_sector(vol, (NTFS_BOOT_SECTOR*)bh->b_data);
+	brelse(bh);
+	if (!result) {
+		ntfs_error(sb, "Unsupported NTFS filesystem.");
+		return -1;
+	}
+	/*
+	 * If the boot sector indicates a sector size bigger than the current
+	 * device block size, switch the device block size to the sector size.
+	 * TODO: It may be possible to support this case even when the set
+	 * below fails, we would just be breaking up the i/o for each sector
+	 * into multiple blocks for i/o purposes but otherwise it should just
+	 * work.  However it is safer to leave disabled until someone hits this
+	 * error message and then we can get them to try it without the setting
+	 * so we know for sure that it works.
+	 */
+	if (vol->sector_size > blocksize) {
+		blocksize = sb_set_blocksize(sb, vol->sector_size);
+		if (blocksize != vol->sector_size) {
+			ntfs_error(sb, "Unable to set device block "
+						"size to sector size (%i).",
+						vol->sector_size);
+			return -1;
+		}
+		BUG_ON(blocksize != sb->s_blocksize);
+		vol->nr_blocks = i_size_read(sb->s_bdev->bd_inode) >>
+				sb->s_blocksize_bits;
+		ntfs_debug("Changed device block size to %i bytes (block size "
+				"bits %i) to match volume sector size.",
+				blocksize, sb->s_blocksize_bits);
+	}
+
+
+	return 0;
+}
+
+
 /**
- * ntfs_fill_super - mount an ntfs filesystem
+ * ntfs_fill_super - fill super block while mount a ntfs filesystem
+ * 在挂载时初始化super block,进行初始化设置，特别是s_op
  * @sb:		super block of ntfs filesystem to mount
  * @opt:	string containing the mount options
  * @silent:	silence error output
@@ -2701,9 +2789,8 @@ static const struct super_operations ntfs_sops = {
 static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 {
 	ntfs_volume *vol;
-	struct buffer_head *bh;
 	struct inode *tmp_ino;
-	int blocksize, result;
+	int result;
 
 	/*
 	 * We do a pretty difficult piece of bootstrap by reading the
@@ -2717,9 +2804,7 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 	 */
 	lockdep_off();
 	ntfs_debug("Entering.");
-#ifndef NTFS_RW
-	sb->s_flags |= MS_RDONLY;
-#endif /* ! NTFS_RW */
+
 	/* Allocate a new ntfs_volume and place it in sb->s_fs_info. */
 	sb->s_fs_info = kmalloc(sizeof(ntfs_volume), GFP_NOFS);
 	vol = NTFS_SB(sb);
@@ -2753,80 +2838,14 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 		goto err_out_now;
 
 	/* We support sector sizes up to the PAGE_SIZE. */
-	if (bdev_logical_block_size(sb->s_bdev) > PAGE_SIZE) {
-		if (!silent)
-			ntfs_error(sb, "Device has unsupported sector size "
-					"(%i).  The maximum supported sector "
-					"size on this architecture is %lu "
-					"bytes.",
-					bdev_logical_block_size(sb->s_bdev),
-					PAGE_SIZE);
+	if(check_block_size(sb)) 
+	{
 		goto err_out_now;
 	}
-	/*
-	 * Setup the device access block size to NTFS_BLOCK_SIZE or the hard
-	 * sector size, whichever is bigger.
-	 */
-	blocksize = sb_min_blocksize(sb, NTFS_BLOCK_SIZE);
-	if (blocksize < NTFS_BLOCK_SIZE) {
-		if (!silent)
-			ntfs_error(sb, "Unable to set device block size.");
-		goto err_out_now;
-	}
-	BUG_ON(blocksize != sb->s_blocksize);
-	ntfs_debug("Set device block size to %i bytes (block size bits %i).",
-			blocksize, sb->s_blocksize_bits);
-	/* Determine the size of the device in units of block_size bytes. */
-	if (!i_size_read(sb->s_bdev->bd_inode)) {
-		if (!silent)
-			ntfs_error(sb, "Unable to determine device size.");
-		goto err_out_now;
-	}
-	vol->nr_blocks = i_size_read(sb->s_bdev->bd_inode) >>
-			sb->s_blocksize_bits;
-	/* Read the boot sector and return unlocked buffer head to it. */
-	if (!(bh = read_ntfs_boot_sector(sb, silent))) {
-		if (!silent)
-			ntfs_error(sb, "Not an NTFS volume.");
-		goto err_out_now;
-	}
-	/*
-	 * Extract the data from the boot sector and setup the ntfs volume
-	 * using it.
-	 */
-	result = parse_ntfs_boot_sector(vol, (NTFS_BOOT_SECTOR*)bh->b_data);
-	brelse(bh);
-	if (!result) {
-		if (!silent)
-			ntfs_error(sb, "Unsupported NTFS filesystem.");
-		goto err_out_now;
-	}
-	/*
-	 * If the boot sector indicates a sector size bigger than the current
-	 * device block size, switch the device block size to the sector size.
-	 * TODO: It may be possible to support this case even when the set
-	 * below fails, we would just be breaking up the i/o for each sector
-	 * into multiple blocks for i/o purposes but otherwise it should just
-	 * work.  However it is safer to leave disabled until someone hits this
-	 * error message and then we can get them to try it without the setting
-	 * so we know for sure that it works.
-	 */
-	if (vol->sector_size > blocksize) {
-		blocksize = sb_set_blocksize(sb, vol->sector_size);
-		if (blocksize != vol->sector_size) {
-			if (!silent)
-				ntfs_error(sb, "Unable to set device block "
-						"size to sector size (%i).",
-						vol->sector_size);
-			goto err_out_now;
-		}
-		BUG_ON(blocksize != sb->s_blocksize);
-		vol->nr_blocks = i_size_read(sb->s_bdev->bd_inode) >>
-				sb->s_blocksize_bits;
-		ntfs_debug("Changed device block size to %i bytes (block size "
-				"bits %i) to match volume sector size.",
-				blocksize, sb->s_blocksize_bits);
-	}
+
+	ntfs_register_volume_sysfs(vol);
+
+	
 	/* Initialize the cluster and mft allocators. */
 	ntfs_setup_allocators(vol);
 	/* Setup remaining fields in the super block. */
@@ -2863,6 +2882,8 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 			ntfs_error(sb, "Failed to load essential metadata.");
 		goto iput_tmp_ino_err_out_now;
 	}
+	/* 	vol->mft_ino is now ready to use */
+	ntfs_register_ntfs_inode_sysfs(vol->mft_ino);
 	mutex_lock(&ntfs_lock);
 	/*
 	 * The current mount is a compression user if the cluster size is
@@ -2902,6 +2923,8 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 
 	/* We grab a reference, simulating an ntfs_iget(). */
 	ihold(vol->root_ino);
+	/* 初始化第一个inode
+	并且把它和super block的root绑定 */
 	if ((sb->s_root = d_make_root(vol->root_ino))) {
 		ntfs_debug("Exiting, status successful.");
 		/* Release the default upcase if it has no users. */
@@ -2913,7 +2936,6 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 		mutex_unlock(&ntfs_lock);
 		sb->s_export_op = &ntfs_export_ops;
 		lockdep_on();
-		ntfs_register_volume_sysfs(vol);
 		ntfs_register_ntfs_inode_sysfs(vol->root_ino);
 
 		return 0;
@@ -2927,7 +2949,6 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 	vol->vol_ino = NULL;
 	/* NTFS 3.0+ specific clean up. */
 	if (vol->major_ver >= 3) {
-#ifdef NTFS_RW
 		if (vol->usnjrnl_j_ino) {
 			iput(vol->usnjrnl_j_ino);
 			vol->usnjrnl_j_ino = NULL;
@@ -2948,7 +2969,6 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 			iput(vol->quota_ino);
 			vol->quota_ino = NULL;
 		}
-#endif /* NTFS_RW */
 		if (vol->extend_ino) {
 			iput(vol->extend_ino);
 			vol->extend_ino = NULL;
@@ -3013,12 +3033,13 @@ iput_tmp_ino_err_out_now:
 	iput(tmp_ino);
 	if (vol->mft_ino && vol->mft_ino != tmp_ino)
 		iput(vol->mft_ino);
+	tmp_ino=NULL;
 	vol->mft_ino = NULL;
 	/* Errors at this stage are irrelevant. */
 err_out_now:
 	sb->s_fs_info = NULL;
 	kfree(vol);
-	ntfs_debug("Failed, returning -EINVAL.");
+	ntfs_error(sb,"Failed, returning -EINVAL.");
 	lockdep_on();
 	return -EINVAL;
 }
@@ -3061,12 +3082,12 @@ static struct dentry *ntfs_mount(struct file_system_type *fs_type,
 
 static struct file_system_type nntfs_fs_type = {
 	.owner		= THIS_MODULE,
-	.name		= "nntfs",
+	.name		= FS_NAME,
 	.mount		= ntfs_mount,
 	.kill_sb	= kill_block_super,
 	.fs_flags	= FS_REQUIRES_DEV,
 };
-MODULE_ALIAS_FS("nntfs");
+MODULE_ALIAS_FS("gordon-ntfs");
 
 /* Stable names for the slab caches. */
 static const char ntfs_index_ctx_cache_name[] = "ntfs_index_ctx_cache";

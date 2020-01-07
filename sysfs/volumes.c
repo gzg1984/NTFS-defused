@@ -87,13 +87,13 @@ static ssize_t ntfs_attr_show(struct kobject *kobj,
 	else if(!strcmp(attr->name,"major_ver"))
 	{
 		return snprintf(buf, PAGE_SIZE,
-			"major_ver=%u\n",
+			"%u\n",
 			nv->major_ver);
 	}
 	else if(!strcmp(attr->name,"minor_ver"))
 	{
 		return snprintf(buf, PAGE_SIZE,
-			"minor_ver=%u\n",
+			"%u\n",
 			nv->minor_ver);
 	}
 	else

@@ -26,7 +26,9 @@ else
 	exit 0
 fi
 
+TYPE_NAME=`cat /sys/fs/ntfs/features/mount_type`
+
 mkdir -p /run/temp
-mount -t ntfs-gordon ntfs.img /run/temp -o loop
+mount -t ${TYPE_NAME} ntfs.img /run/temp -o loop
 
 exit 0
