@@ -43,7 +43,7 @@ static ssize_t ntfs_attr_store(struct kobject *kobj,
 		}	
 	}
 
-	return 0;
+	return len;
 }
 
 static const struct sysfs_ops ntfs_attr_ops = {

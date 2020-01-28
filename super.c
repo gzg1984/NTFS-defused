@@ -2252,7 +2252,7 @@ static void ntfs_put_super(struct super_block *sb)
 	ntfs_volume *vol = NTFS_SB(sb);
 
 	ntfs_debug("Entering.");
-	ntfs_unregister_ntfs_inode_sysfs(vol->mft_ino);
+	//ntfs_unregister_ntfs_inode_sysfs(vol->mft_ino);
 	//ntfs_unregister_ntfs_inode_sysfs(vol->root_ino);
 	ntfs_unregister_volume_sysfs(vol);
 
@@ -2883,7 +2883,7 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 		goto iput_tmp_ino_err_out_now;
 	}
 	/* 	vol->mft_ino is now ready to use */
-	ntfs_register_ntfs_inode_sysfs(vol->mft_ino);
+	//ntfs_register_ntfs_inode_sysfs(vol->mft_ino);
 	mutex_lock(&ntfs_lock);
 	/*
 	 * The current mount is a compression user if the cluster size is
