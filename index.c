@@ -2168,7 +2168,7 @@ int ntfs_directory_data_write(ntfs_index_context *icx, INDEX_BLOCK *ib)
         ntfs_inode *idx_ni=icx->idx_ni;
        	const u32 bk_size  = idx_ni->itype.index.block_size;
        	void *src = ib;
-	s64 written;
+	s64 written = 0 ;
        	//s64 i;
 	struct inode *vi = VFS_I(idx_ni);
 
@@ -3413,7 +3413,7 @@ static int ntfs_copy_context_tail(ntfs_index_context *icx,
 {
 	INDEX_ALLOCATION *src = icx->ia;
 	u8 *ies_end;
-	int tail_size, ret;
+	int tail_size, ret = 0;
 	INDEX_BLOCK *dst;
         ntfs_inode *idx_ni=icx->idx_ni;
        	const u32 bk_size  = idx_ni->itype.index.block_size;

@@ -2253,7 +2253,7 @@ static void ntfs_put_super(struct super_block *sb)
 
 	ntfs_debug("Entering.");
 	ntfs_unregister_ntfs_inode_sysfs(vol->mft_ino);
-	ntfs_unregister_ntfs_inode_sysfs(vol->root_ino);
+	//ntfs_unregister_ntfs_inode_sysfs(vol->root_ino);
 	ntfs_unregister_volume_sysfs(vol);
 
 #ifdef NTFS_RW
@@ -2936,7 +2936,7 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 		mutex_unlock(&ntfs_lock);
 		sb->s_export_op = &ntfs_export_ops;
 		lockdep_on();
-		ntfs_register_ntfs_inode_sysfs(vol->root_ino);
+		//ntfs_register_ntfs_inode_sysfs(vol->root_ino);
 
 		return 0;
 	}

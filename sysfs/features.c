@@ -51,7 +51,7 @@ static const struct sysfs_ops ntfs_attr_ops = {
 	.store  = ntfs_attr_store,
 };
 
-#define INIT_ATTR_FEATURE(_name)   NTFS_ATTR(_name, 0444, feature)
+#define INIT_ATTR_FEATURE(_name)   NTFS_ATTR(_name, 0644, feature)
 INIT_ATTR_FEATURE(debug_enabled);
 INIT_ATTR_FEATURE(mount_type);
 

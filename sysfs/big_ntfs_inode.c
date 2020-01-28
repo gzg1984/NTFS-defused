@@ -180,12 +180,22 @@ static struct kobj_type ntfs_mft_ktype = {
 
 int ntfs_register_ntfs_inode_sysfs(struct inode *vi)
 {       
-	int err;
-    ntfs_inode* ni=NTFS_I(vi);
-    big_ntfs_inode* bni=(big_ntfs_inode*)ni;
-	struct kobject* p=&(bni->bni_kobj);
-    ntfs_volume* nv=ni->vol;
-    struct kset* top=&(nv->v_kset);
+	int err = -1;
+	ntfs_inode* ni = NULL;
+	big_ntfs_inode* bni = NULL;
+	struct kobject* p = NULL;
+	ntfs_volume* nv = NULL;
+	struct kset* top = NULL;
+
+	if(!vi)
+		return -EINVAL;
+
+	/* init all of the var */
+    ni=NTFS_I(vi);
+    bni=(big_ntfs_inode*)ni;
+	p=&(bni->bni_kobj);
+    nv=ni->vol;
+    top=&(nv->v_kset);
 
 	p->kset = top;
 
@@ -197,11 +207,19 @@ int ntfs_register_ntfs_inode_sysfs(struct inode *vi)
 
 	return 0;
 }
-
-void ntfs_unregister_ntfs_inode_sysfs(struct inode *vi)
+static inline struct kobject* vfs_inode_to_kobj(struct inode *vi)
 {
-    ntfs_inode* ni=NTFS_I(vi);
+	ntfs_inode* ni=NTFS_I(vi);
     big_ntfs_inode* bni=(big_ntfs_inode*)ni;
 	struct kobject* p=&(bni->bni_kobj);
+	return p;
+}
+void ntfs_unregister_ntfs_inode_sysfs(struct inode *vi)
+{
+	struct kobject* p = NULL;
+	if(!vi)
+		return;
+
+	p=vfs_inode_to_kobj(vi);
 	kobject_del(p);
 }

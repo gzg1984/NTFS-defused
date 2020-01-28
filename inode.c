@@ -250,12 +250,6 @@ struct inode *ntfs_iget(struct super_block *sb, unsigned long mft_no)
 		iput(vi);
 		vi = ERR_PTR(err);
 	}
-	/*
-	if (!err)
-	{
-		ntfs_register_ntfs_inode_sysfs(vol->root_ino);
-	}*/
-
 	return vi;
 }
 
