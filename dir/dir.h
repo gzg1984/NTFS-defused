@@ -23,9 +23,18 @@
 #ifndef _LINUX_NTFS_DIR_H
 #define _LINUX_NTFS_DIR_H
 
+#include <linux/buffer_head.h>
+#include <linux/slab.h>
+
 #include "layout.h"
 #include "types.h"
 #include "inode.h"
+
+#include "aops.h"
+#include "mft.h"
+#include "debug.h"
+#include "ntfs.h"
+#include "compat.h"
 
 /*
  * int inline is_actor_exceed_root(const struct dir_context* actor, const ntfs_volume* vol)
@@ -40,4 +49,7 @@
  */
 #define offset_actor_exceed_root(actor,vol) (actor->pos - vol->mft_record_size) 
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,4,0))
+int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir);
+#endif
 #endif /* _LINUX_NTFS_FS_DIR_H */

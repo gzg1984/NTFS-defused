@@ -32,7 +32,7 @@
 #include "aops.h"
 #include "attrib.h"
 #include "bitmap.h"
-#include "dir.h"
+//#include "dir.h"
 #include "debug.h"
 #include "inode.h"
 #include "index.h"

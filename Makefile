@@ -8,9 +8,13 @@ ntfs-y := aops.o attrib.o collate.o compress.o debug.o file.o \
 	  inode.o ntfs_inode.o 
 
 # For Index Entry Handler
-ntfs-y += dir.o index.o index_root.o namei.o \
-	index_entry_create.o \
-	index_entry_delete.o
+ntfs-y += dir/dir.o \
+	dir/readdir.o \
+	dir/namei.o \
+	dir/index.o \
+	dir/index_root.o \
+	dir/index_entry_create.o \
+	dir/index_entry_delete.o
 
 # For compatition
 ntfs-y += compat.o

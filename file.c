@@ -336,7 +336,7 @@ err_out:
 	return err;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
 static ssize_t ntfs_prepare_file_for_write(struct kiocb *iocb,
 		struct iov_iter *from)
 {
@@ -1883,7 +1883,7 @@ err_out:
 	return err;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
 /*
  * Copy as much as we can into the pages and return the number of bytes which
  * were successfully copied.  If a fault is encountered then clear the pages
@@ -2583,7 +2583,7 @@ const struct file_operations ntfs_file_ops = {
 	.aio_read   = generic_file_aio_read, /* Async read from file. */
 #endif
 #ifdef NTFS_RW
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
 	.write_iter	= ntfs_file_write_iter,
 #else
 	.write		= do_sync_write,	 /* Write to file. */

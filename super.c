@@ -37,7 +37,7 @@
 #include "logfile.h"
 #include "quota.h"
 #include "usnjrnl.h"
-#include "dir.h"
+#include "dir/dir.h"
 #include "debug.h"
 #include "index.h"
 #include "inode.h"

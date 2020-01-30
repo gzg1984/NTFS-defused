@@ -21,7 +21,7 @@
  */
 
 #include "debug.h"
-#include "dir.h"
+//#include "dir.h"
 #include "endian.h"
 #include "malloc.h"
 #include "ntfs.h"

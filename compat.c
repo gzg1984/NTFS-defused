@@ -13,7 +13,7 @@
 
 extern int ntfs_read_bh(struct buffer_head *bh)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 	return submit_bh(REQ_OP_READ, 0, bh);
 #else
 	return submit_bh(READ, bh);
@@ -22,7 +22,7 @@ extern int ntfs_read_bh(struct buffer_head *bh)
 
 extern int ntfs_write_bh(struct buffer_head *bh)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 	return submit_bh(REQ_OP_WRITE, 0, bh);
 #else
 	return submit_bh(WRITE, bh);
@@ -31,7 +31,7 @@ extern int ntfs_write_bh(struct buffer_head *bh)
 
 extern void ntfs_clean_bh(struct buffer_head *bh)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 	clean_bdev_bh_alias(bh);
 #else
 	unmap_underlying_metadata(bh->b_bdev,
@@ -43,7 +43,7 @@ extern ssize_t ntfs_write_iocb(struct kiocb *iocb, ssize_t written)
 {
 	struct file *file = iocb->ki_filp;
 	struct inode *vi = file_inode(file);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 	inode_unlock(vi);
 	iocb->ki_pos += written;
 	if (likely(written > 0))
@@ -64,7 +64,7 @@ extern ssize_t ntfs_write_iocb(struct kiocb *iocb, ssize_t written)
 
 void ntfs_block_invalidatepage(struct page *page, unsigned int offset, unsigned int length)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 	block_invalidatepage(page, offset,length);
 #else
 	block_invalidatepage_range(page, offset, length);
@@ -73,7 +73,7 @@ void ntfs_block_invalidatepage(struct page *page, unsigned int offset, unsigned 
 
 struct page *ntfs_find_get_page_flags(struct address_space *mapping, pgoff_t offset, int fgp_flags)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 	return find_get_page_flags(mapping, offset, fgp_flags);
 #else
 	return find_get_page(mapping, offset);

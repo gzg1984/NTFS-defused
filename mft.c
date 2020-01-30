@@ -30,7 +30,7 @@
 #include "aops.h"
 #include "bitmap.h"
 #include "debug.h"
-#include "dir.h"
+//#include "dir.h"
 #include "lcnalloc.h"
 #include "malloc.h"
 #include "mft.h"
