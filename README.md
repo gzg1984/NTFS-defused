@@ -10,50 +10,13 @@ a kernel developer
 # About the NTFS datasheet
 - https://flatcap.github.io/linux-ntfs/ntfs/
 
-# User Interfaces
-## Debug Mode
-### Enable Debug Mode
-- via proc
-```
-echo 1 > /proc/sys/fs/ntfs-debug
-```
-- via sysfs
-```
-echo 1 > /sys/fs/ntfs/features/debug_enabled 
-```
-### Disable Debug Mode
-- via proc
-```
-echo 0 > /proc/sys/fs/ntfs-debug
-```
-- via sysfs
-```
-echo 0 > /sys/fs/ntfs/features/debug_enabled 
-```
-### Query Debug Mode
-- via proc
-```
-cat /proc/sys/fs/ntfs-debug
-```
-- via sysfs
-```
-cat /sys/fs/ntfs/features/debug_enabled 
-```
-## Volume MFT info
-### Query The Super Block MFT INFO
-```
-cat /sys/fs/ntfs/loop0/map_ino 
-```
-## Mount Option
-### File system type
-- To avoid the confliction with kernel ntfs driver and ntfs-3g driver, you can specified the FS type according to the sysfs interface
-```
-TYPE=`cat /sys/fs/ntfs/features/mount_type`
-mount -t ${TYPE} /dev/sdN /mnt
-```
-
 # Scripts
 ## The simplest mount test script
 ```
 ./LoadModule.sh
 ```
+
+# Devlopment Story
+- 2020 Jan 30
+    I have finally make it compact in 3.10 and 4.4
+    U can clone this project and make it in your desktop linux computer with 3.10 and 4.4 kernel directly now.
