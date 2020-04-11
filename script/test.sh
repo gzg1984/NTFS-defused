@@ -2,6 +2,13 @@
 
 echo -n "Check mount Point..."
 mounttype=`./prepare.sh type`
+if [ "$?" -ne 0 ]
+then
+	echo "Error:$mounttype"
+	exit 255
+fi
+
+
 mountrecord=`mount|grep  ${mounttype}`
 recordline=`echo ${mountrecord}|wc -l`
 if [ ${recordline} -eq "0" ]

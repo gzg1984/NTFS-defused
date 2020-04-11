@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Step 1 create image
-if [ $# -eq 0 -o $1 == "image" ]
+if [ "$#" -eq "0" -o "$1" == "image" ]
 then
 	dd if=/dev/zero of=ntfs.img bs=1024 count=10240
 	losetup /dev/loop9 ntfs.img
@@ -20,7 +20,7 @@ then
 fi
 
 # Step 2 Load Module
-if [ $# -eq 0 -o $1 == "load" ]
+if [ "$#" -eq 0 -o "$1" == "load" ]
 then
 	if [ `id -u` -eq "0" ]
 	then
@@ -51,14 +51,20 @@ then
 fi
 
 # Step 2.5 get mount type
-TYPE_NAME=`cat /sys/fs/ntfs/features/mount_type`
-if [ $1 == "type" ]
+if [ -f /sys/fs/ntfs/features/mount_type ]
+then
+	TYPE_NAME=`cat /sys/fs/ntfs/features/mount_type`
+else
+	echo "Cannot Find /sys/fs/ntfs/features/mount_type"
+	exit 255
+fi
+if [ "$1" == "type" ]
 then
 	echo -n ${TYPE_NAME}
 fi
 
 # Step 3 Mount Image
-if [ $# -eq 0 -o $1 == "mount" ]
+if [ "$#" -eq 0 -o "$1" == "mount" ]
 then
 	mkdir -p /run/temp
 	mount -t ${TYPE_NAME} ntfs.img /run/temp -o loop
