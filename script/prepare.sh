@@ -50,11 +50,16 @@ then
 	fi
 fi
 
+# Step 2.5 get mount type
+TYPE_NAME=`cat /sys/fs/ntfs/features/mount_type`
+if [ $1 == "type" ]
+then
+	echo -n ${TYPE_NAME}
+fi
+
 # Step 3 Mount Image
 if [ $# -eq 0 -o $1 == "mount" ]
 then
-	TYPE_NAME=`cat /sys/fs/ntfs/features/mount_type`
-
 	mkdir -p /run/temp
 	mount -t ${TYPE_NAME} ntfs.img /run/temp -o loop
 fi
