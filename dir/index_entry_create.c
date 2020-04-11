@@ -24,13 +24,11 @@
 #include <linux/security.h>
 #include <linux/slab.h>
 
-#include "attrib.h"
-#include "debug.h"
 #include "dir.h"
-#include "mft.h"
-#include "ntfs.h"
-#include "lcnalloc.h"
-#include "index.h"
+#include "../mft.h"
+#include "../ntfs.h"
+#include "../lcnalloc.h"
+#include "../index.h"
 #include <linux/version.h>
 /**
  * ntfs_create_index_entry - add filename to directory index

@@ -21,7 +21,7 @@
  */
 
 #include "dir.h"
-#include "attrib.h"
+#include "../attrib.h"
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,4,0))
 /**
  * ntfs_filldir - ntfs specific filldir method

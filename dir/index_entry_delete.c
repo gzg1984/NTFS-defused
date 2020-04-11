@@ -23,13 +23,8 @@
 #include <linux/security.h>
 #include <linux/slab.h>
 
-#include "attrib.h"
-#include "debug.h"
+
 #include "dir.h"
-#include "mft.h"
-#include "ntfs.h"
-#include "lcnalloc.h"
-#include "index.h"
 
 
 static int ntfs_index_rm_node(ntfs_index_context *icx)

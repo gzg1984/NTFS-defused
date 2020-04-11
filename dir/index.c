@@ -21,11 +21,11 @@
 
 #include <linux/slab.h>
 
-#include "aops.h"
-#include "collate.h"
-#include "debug.h"
-#include "index.h"
-#include "ntfs.h"
+#include "../aops.h"
+#include "../collate.h"
+#include "../debug.h"
+#include "../index.h"
+#include "../ntfs.h"
 
 /**
  ** The little endian Unicode string $I30 as a global constant.

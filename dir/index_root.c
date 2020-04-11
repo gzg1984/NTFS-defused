@@ -1,7 +1,7 @@
 #include <linux/slab.h>
-#include "ntfs.h"
-#include "inode.h"
-#include "index.h"
+#include "../ntfs.h"
+#include "../inode.h"
+#include "../index.h"
 static char* collation_rule_string(COLLATION_RULE rule)
 {
 	switch(rule)

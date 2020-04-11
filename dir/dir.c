@@ -26,11 +26,11 @@
 #include <linux/slab.h>
 
 #include "dir.h"
-#include "aops.h"
-#include "mft.h"
-#include "debug.h"
-#include "ntfs.h"
-#include "compat.h"
+#include "../aops.h"
+#include "../mft.h"
+#include "../debug.h"
+#include "../ntfs.h"
+#include "../compat.h"
 
 /**
  * ntfs_loop_filldir - ntfs specific filldir method

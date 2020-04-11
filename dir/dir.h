@@ -26,15 +26,23 @@
 #include <linux/buffer_head.h>
 #include <linux/slab.h>
 
-#include "layout.h"
-#include "types.h"
-#include "inode.h"
+#include "../layout.h"
+#include "../types.h"
+#include "../inode.h"
 
-#include "aops.h"
-#include "mft.h"
-#include "debug.h"
-#include "ntfs.h"
-#include "compat.h"
+#include "../aops.h"
+#include "../mft.h"
+#include "../debug.h"
+#include "../ntfs.h"
+#include "../compat.h"
+#include "../attrib.h"
+
+
+
+#include "../lcnalloc.h"
+#include "../index.h"
+
+
 
 /*
  * int inline is_actor_exceed_root(const struct dir_context* actor, const ntfs_volume* vol)
