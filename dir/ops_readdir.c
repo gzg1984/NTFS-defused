@@ -46,13 +46,13 @@
  * retake the lock if we are returning a non-zero value as ntfs_readdir()
  * would need to drop the lock immediately anyway.
  */
-static inline int ntfs_filldir(ntfs_volume *vol, loff_t fpos,
-							   ntfs_inode *ndir,
-							   struct page *ia_page,
-							   INDEX_ENTRY *ie,
-							   u8 *name,
-							   void *dirent,
-							   filldir_t filldir)
+static int ntfs_filldir(ntfs_volume *vol, loff_t fpos,
+						ntfs_inode *ndir,
+						struct page *ia_page,
+						INDEX_ENTRY *ie,
+						u8 *name,
+						void *dirent,
+						filldir_t filldir)
 {
 	unsigned long mref;
 	int name_len, rc;
@@ -60,16 +60,19 @@ static inline int ntfs_filldir(ntfs_volume *vol, loff_t fpos,
 	FILE_NAME_TYPE_FLAGS name_type;
 
 	name_type = ie->key.file_name.file_name_type;
-	if (name_type == FILE_NAME_DOS) {
+	if (name_type == FILE_NAME_DOS)
+	{
 		ntfs_debug("Skipping DOS name space entry.");
 		return 0;
 	}
-	if (MREF_LE(ie->data.dir.indexed_file) == FILE_ROOT) {
+	if (MREF_LE(ie->data.dir.indexed_file) == FILE_ROOT)
+	{
 		ntfs_debug("Skipping root directory self reference entry.");
 		return 0;
 	}
 	if (MREF_LE(ie->data.dir.indexed_file) < FILE_first_user &&
-		!NVolShowSystemFiles(vol)) {
+		!NVolShowSystemFiles(vol))
+	{
 		ntfs_debug("Skipping system file.");
 		return 0;
 	}
@@ -104,6 +107,122 @@ static inline int ntfs_filldir(ntfs_volume *vol, loff_t fpos,
 		lock_page(ia_page);
 	return rc;
 }
+static int fill_from_root(struct file *filp,
+						void *dirent,
+						ntfs_volume *vol,
+						ntfs_inode *ndir,
+						u8 *name,
+						filldir_t filldir)
+{
+	MFT_RECORD *m = NULL;
+	ntfs_attr_search_ctx *ctx = NULL;
+	loff_t ir_pos;
+	int err = 0;
+	int rc = 0;
+	struct inode *vdir = filp->f_path.dentry->d_inode;
+	INDEX_ROOT *ir = NULL;
+	u8 *index_end;
+	loff_t fpos = filp->f_pos;
+	INDEX_ENTRY *ie;
+
+	/* Get hold of the mft record for the directory. */
+	m = map_mft_record(ndir);
+	if (IS_ERR(m))
+	{
+		err = PTR_ERR(m);
+		m = NULL;
+		return err;
+	}
+
+	ctx = ntfs_attr_get_search_ctx(ndir, m);
+	if (unlikely(!ctx))
+	{
+		err = -ENOMEM;
+		return err;
+	}
+	/* Get the offset into the index root attribute. */
+	ir_pos = (loff_t)fpos;
+	/* Find the index root attribute in the mft record. */
+	err = ntfs_attr_lookup(AT_INDEX_ROOT, I30, 4, CASE_SENSITIVE, 0, NULL,
+						   0, ctx);
+	if (unlikely(err))
+	{
+		ntfs_error(vdir->i_sb, "Index root attribute missing in directory "
+					   "inode 0x%lx.",
+				   vdir->i_ino);
+		return err;
+	}
+	/*
+	 * Copy the index root attribute value to a buffer so that we can put
+	 * the search context and unmap the mft record before calling the
+	 * filldir() callback.  We need to do this because of NFSd which calls
+	 * ->lookup() from its filldir callback() and this causes NTFS to
+	 * deadlock as ntfs_lookup() maps the mft record of the directory and
+	 * we have got it mapped here already.  The only solution is for us to
+	 * unmap the mft record here so that a call to ntfs_lookup() is able to
+	 * map the mft record without deadlocking.
+	 */
+	rc = le32_to_cpu(ctx->attr->data.resident.value_length);
+	ir = kmalloc(rc, GFP_NOFS);
+	if (unlikely(!ir))
+	{
+		err = -ENOMEM;
+		return err;
+	}
+	/* Copy the index root value (it has been verified in read_inode). */
+	memcpy(ir, (u8 *)ctx->attr + le16_to_cpu(ctx->attr->data.resident.value_offset), rc);
+	ntfs_attr_put_search_ctx(ctx);
+	unmap_mft_record(ndir);
+	ctx = NULL;
+	m = NULL;
+	index_end = (u8 *)&ir->index + le32_to_cpu(ir->index.index_length);
+	/* The first index entry. */
+	ie = (INDEX_ENTRY *)((u8 *)&ir->index +
+						 le32_to_cpu(ir->index.entries_offset));
+	/*
+	 * Loop until we exceed valid memory (corruption case) or until we
+	 * reach the last entry or until filldir tells us it has had enough
+	 * or signals an error (both covered by the rc test).
+	 */
+	for (;; ie = (INDEX_ENTRY *)((u8 *)ie + le16_to_cpu(ie->length)))
+	{
+		ntfs_debug("In index root, offset 0x%zx.", (u8 *)ie - (u8 *)ir);
+		/* Bounds checks. */
+		err=-1;
+		if (unlikely((u8 *)ie < (u8 *)ir || (u8 *)ie + sizeof(INDEX_ENTRY_HEADER) > index_end ||
+					 (u8 *)ie + le16_to_cpu(ie->key_length) >
+						 index_end))
+			goto err_out;
+		/* The last entry cannot contain a name. */
+		if (ie->flags & INDEX_ENTRY_END)
+			break;
+		/* Skip index root entry if continuing previous readdir. */
+		if (ir_pos > (u8 *)ie - (u8 *)ir)
+			continue;
+		/* Advance the position even if going to skip the entry. */
+		fpos = (u8 *)ie - (u8 *)ir;
+		/* Submit the name to the filldir callback. */
+		rc = ntfs_filldir(vol, fpos, ndir, NULL, ie, name, dirent,
+						  filldir);
+		if (rc)
+		{
+			kfree(ir);
+			return 1;
+		}
+	}
+	/* We are done with the index root and can free the buffer. */
+
+	err = 0;
+err_out:
+	kfree(ir);
+	ir = NULL;
+	if (ctx)
+		ntfs_attr_put_search_ctx(ctx);
+	if (m)
+		unmap_mft_record(ndir);
+	return err;
+}
+
 /*
  * We use the same basic approach as the old NTFS driver, i.e. we parse the
  * index root entries and then the index allocation entries that are marked
@@ -132,17 +251,13 @@ int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	struct super_block *sb = vdir->i_sb;
 	ntfs_inode *ndir = NTFS_I(vdir);
 	ntfs_volume *vol = NTFS_SB(sb);
-	MFT_RECORD *m;
-	INDEX_ROOT *ir = NULL;
 	INDEX_ENTRY *ie;
 	INDEX_ALLOCATION *ia;
 	u8 *name = NULL;
-	int rc, err, ir_pos, cur_bmp_pos;
+	int rc, err, cur_bmp_pos;
 	struct address_space *ia_mapping, *bmp_mapping;
 	struct page *bmp_page = NULL, *ia_page = NULL;
 	u8 *kaddr, *bmp, *index_end;
-	ntfs_attr_search_ctx *ctx;
-
 
 	rc = err = 0;
 
@@ -157,106 +272,27 @@ int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	/* first init after emit */
 	fpos = filp->f_pos;
 
-	m = NULL;
-	ctx = NULL;
+	
 	/*
 	 * Allocate a buffer to store the current name being processed
 	 * converted to format determined by current NLS.
 	 */
 	name = kmalloc(NTFS_MAX_NAME_LEN * NLS_MAX_CHARSET_SIZE + 1, GFP_NOFS);
-	if (unlikely(!name)) {
+	if (unlikely(!name))
+	{
 		err = -ENOMEM;
 		goto err_out;
 	}
 	/* Are we jumping straight into the index allocation attribute? */
 	if (is_exceed_root(fpos, vol))
 		goto skip_index_root;
-	/* Get hold of the mft record for the directory. */
-	m = map_mft_record(ndir);
-	if (IS_ERR(m))
-	{
-		err = PTR_ERR(m);
-		m = NULL;
+
+	err =  fill_from_root(filp, dirent, vol, ndir, name, filldir);
+	if (err < 0 ) 
 		goto err_out;
-	}
-	ctx = ntfs_attr_get_search_ctx(ndir, m);
-	if (unlikely(!ctx))
-	{
-		err = -ENOMEM;
-		goto err_out;
-	}
-	/* Get the offset into the index root attribute. */
-	ir_pos = (s64)fpos;
-	/* Find the index root attribute in the mft record. */
-	err = ntfs_attr_lookup(AT_INDEX_ROOT, I30, 4, CASE_SENSITIVE, 0, NULL,
-						   0, ctx);
-	if (unlikely(err))
-	{
-		ntfs_error(sb, "Index root attribute missing in directory "
-					   "inode 0x%lx.",
-				   vdir->i_ino);
-		goto err_out;
-	}
-	/*
-	 * Copy the index root attribute value to a buffer so that we can put
-	 * the search context and unmap the mft record before calling the
-	 * filldir() callback.  We need to do this because of NFSd which calls
-	 * ->lookup() from its filldir callback() and this causes NTFS to
-	 * deadlock as ntfs_lookup() maps the mft record of the directory and
-	 * we have got it mapped here already.  The only solution is for us to
-	 * unmap the mft record here so that a call to ntfs_lookup() is able to
-	 * map the mft record without deadlocking.
-	 */
-	rc = le32_to_cpu(ctx->attr->data.resident.value_length);
-	ir = kmalloc(rc, GFP_NOFS);
-	if (unlikely(!ir))
-	{
-		err = -ENOMEM;
-		goto err_out;
-	}
-	/* Copy the index root value (it has been verified in read_inode). */
-	memcpy(ir, (u8 *)ctx->attr + le16_to_cpu(ctx->attr->data.resident.value_offset), rc);
-	ntfs_attr_put_search_ctx(ctx);
-	unmap_mft_record(ndir);
-	ctx = NULL;
-	m = NULL;
-	index_end = (u8 *)&ir->index + le32_to_cpu(ir->index.index_length);
-	/* The first index entry. */
-	ie = (INDEX_ENTRY *)((u8 *)&ir->index +
-						 le32_to_cpu(ir->index.entries_offset));
-	/*
-	 * Loop until we exceed valid memory (corruption case) or until we
-	 * reach the last entry or until filldir tells us it has had enough
-	 * or signals an error (both covered by the rc test).
-	 */
-	for (;; ie = (INDEX_ENTRY *)((u8 *)ie + le16_to_cpu(ie->length)))
-	{
-		ntfs_debug("In index root, offset 0x%zx.", (u8 *)ie - (u8 *)ir);
-		/* Bounds checks. */
-		if (unlikely((u8 *)ie < (u8 *)ir || (u8 *)ie + sizeof(INDEX_ENTRY_HEADER) > index_end ||
-					 (u8 *)ie + le16_to_cpu(ie->key_length) >
-						 index_end))
-			goto err_out;
-		/* The last entry cannot contain a name. */
-		if (ie->flags & INDEX_ENTRY_END)
-			break;
-		/* Skip index root entry if continuing previous readdir. */
-		if (ir_pos > (u8 *)ie - (u8 *)ir)
-			continue;
-		/* Advance the position even if going to skip the entry. */
-		fpos = (u8 *)ie - (u8 *)ir;
-		/* Submit the name to the filldir callback. */
-		rc = ntfs_filldir(vol, fpos, ndir, NULL, ie, name, dirent,
-						  filldir);
-		if (rc)
-		{
-			kfree(ir);
-			goto abort;
-		}
-	}
-	/* We are done with the index root and can free the buffer. */
-	kfree(ir);
-	ir = NULL;
+	if (err > 0 ) 
+		goto abort;
+
 	/* If there is no index allocation attribute we are finished. */
 	if (!NInoIndexAllocPresent(ndir))
 		goto EOD;
@@ -505,12 +541,12 @@ err_out:
 		unlock_page(ia_page);
 		ntfs_unmap_page(ia_page);
 	}
-	kfree(ir);
+	//kfree(ir);
 	kfree(name);
-	if (ctx)
-		ntfs_attr_put_search_ctx(ctx);
-	if (m)
-		unmap_mft_record(ndir);
+	//if (ctx)
+	//	ntfs_attr_put_search_ctx(ctx);
+	//if (m)
+	//	unmap_mft_record(ndir);
 	if (!err)
 		err = -EIO;
 	ntfs_debug("Failed. Returning error code %i.", -err);

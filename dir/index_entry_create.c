@@ -38,7 +38,8 @@
  *
  * Return 0 on success or -1 on error with errno set to the error code.
  */
-static int ntfs_create_index_entry(ntfs_inode *dir_ni, FILE_NAME_ATTR *fn, MFT_REF mref)
+static int ntfs_create_index_entry(ntfs_inode *dir_ni, 
+	FILE_NAME_ATTR *fn, MFT_REF mref)
 {
 	INDEX_ENTRY *ie;
 	int ret = -1;
