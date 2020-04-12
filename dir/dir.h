@@ -37,27 +37,63 @@
 #include "../compat.h"
 #include "../attrib.h"
 
-
-
 #include "../lcnalloc.h"
 #include "../index.h"
-
-
 
 /*
  * int inline is_actor_exceed_root(const struct dir_context* actor, const ntfs_volume* vol)
  **/
-#define is_actor_exceed_root(actor,vol) (actor->pos >= vol->mft_record_size) 
+#define is_exceed_root(pos, vol) ((pos) >= vol->mft_record_size)
 /*
  * void inline mark_actor_exceed_root(/--output--/struct  dir_context* actor,const ntfs_volume* vol)
  */
-#define mark_actor_exceed_root(actor,vol)	(actor->pos = vol->mft_record_size)
+#define mark_actor_exceed_root(actor, vol) (actor->pos = vol->mft_record_size)
 /*
  * loff_t inline offset_actor_exceed_root(const struct dir_context* actor,const ntfs_volume* vol)
  */
-#define offset_actor_exceed_root(actor,vol) (actor->pos - vol->mft_record_size) 
+#define offset_actor_exceed_root(actor, vol) (actor->pos - vol->mft_record_size)
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,4,0))
+int ntfs_dir_iterate(struct file *file, struct dir_context *actor);
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0))
 int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir);
 #endif
+
+static inline int is_exceed_dir_end(const loff_t pos, const struct inode *vnode)
+{
+	struct super_block *sb = vnode->i_sb;
+	ntfs_volume *vol = NTFS_SB(sb);
+	/* Are we at end of dir yet? */
+	loff_t i_size = i_size_read(vnode);
+	/* vol->mft_record_size is the for the root index */
+	/* i_size is for the allocated index */
+	if (pos >= i_size + vol->mft_record_size)
+	{
+		return true;
+	}
+	return false;
+}
+
+static inline int ntfs_emit_dots(struct file *filp, void *dirent, filldir_t filldir)
+{
+	int rc = 0 ;
+	struct inode *vdir = filp->f_path.dentry->d_inode;
+
+	if (0 /* . */ == filp->f_pos)
+	{
+		rc = filldir(dirent, ".", 1, filp->f_pos, vdir->i_ino, DT_DIR);
+		if (rc)
+			return false;
+		filp->f_pos = 1;
+	}
+	if (1 /* .. */ == filp->f_pos)
+	{
+		rc = filldir(dirent, "..", 2, filp->f_pos,
+					 parent_ino(filp->f_path.dentry), DT_DIR);
+		if (rc)
+			return false;
+		filp->f_pos = 2;
+	}
+	return true;
+}
 #endif /* _LINUX_NTFS_FS_DIR_H */

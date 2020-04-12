@@ -1,5 +1,5 @@
 /**
- * dir.c - NTFS kernel directory operations. 
+ * dir.c - NTFS kernel directory operations.
  * Part of the NTFS-defused.git
  *
  * Copyright (c) 2017 Gordon
@@ -34,7 +34,7 @@
 
 /**
  * ntfs_loop_filldir - ntfs specific filldir method
- * 		designed for the looper ntfs_index_walk_entry_in_header
+ * designed for the looper ntfs_index_walk_entry_in_header
  * @dir:	ntfs inode(or vfs inode) of current directory
  * @ie:		current index entry
  * @actor:	what to feed the entries to
@@ -46,10 +46,10 @@
  * allocation block containing the index entry @ie.
  *
  */
-static int ntfs_loop_filldir(void* _dir,INDEX_ENTRY *ie, void *_actor)
+static int ntfs_loop_filldir(void *_dir, INDEX_ENTRY *ie, void *_actor)
 {
 	struct inode *vdir = _dir;
-        struct super_block *sb = vdir->i_sb;
+	struct super_block *sb = vdir->i_sb;
 	ntfs_volume *vol = NTFS_SB(sb);
 	u8 *name = NULL;
 	struct dir_context *actor = _actor;
@@ -64,8 +64,7 @@ static int ntfs_loop_filldir(void* _dir,INDEX_ENTRY *ie, void *_actor)
 	 * converted to format determined by current NLS.
 	 */
 	name = kmalloc(NTFS_MAX_NAME_LEN * NLS_MAX_CHARSET_SIZE + 1, GFP_NOFS);
-	if (unlikely(!name)) 
-	{
+	if (unlikely(!name)) {
 		ntfs_debug("No enough Memory for $name.");
 		return -ENOMEM;
 	}
@@ -76,7 +75,7 @@ static int ntfs_loop_filldir(void* _dir,INDEX_ENTRY *ie, void *_actor)
 		rc =  0;
 		goto out;
 	}
-	if (MREF_LE(ie->data.dir.indexed_file) == FILE_root) {
+	if (MREF_LE(ie->data.dir.indexed_file) == FILE_ROOT) {
 		ntfs_debug("Skipping root directory self reference entry.");
 		rc =  0;
 		goto out;
@@ -133,16 +132,18 @@ out:
  *	       locked whilst being accessed otherwise we may find a corrupt
  *	       page due to it being under ->writepage at the moment which
  *	       applies the mst protection fixups before writing out and then
- *	       removes them again after the write is complete after which it 
+ *	       removes them again after the write is complete after which it
  *	       unlocks the page.
  */
-extern int index_root_iterate(struct inode *vdir,loff_t* p_skip_pos,
-		                ie_looper func,void* parameter);
-static int ntfs_dir_iterate(struct file *file, struct dir_context *actor)
+extern int index_root_iterate(struct inode *vdir,
+						loff_t *p_skip_pos,
+						ie_looper func,
+						void *parameter);
+
+int ntfs_dir_iterate(struct file *file, struct dir_context *actor)
 {
 	s64 ia_pos, ia_start, prev_ia_pos;
 	loff_t ih_offset;
-	loff_t i_size;
 	struct inode *vdir = file_inode(file);
 	struct super_block *sb = vdir->i_sb;
 	ntfs_inode *ndir = NTFS_I(vdir);
@@ -156,44 +157,36 @@ static int ntfs_dir_iterate(struct file *file, struct dir_context *actor)
 	ntfs_debug("Entering Phase: For inode 0x%lx, fpos 0x%llx.",
 			vdir->i_ino, actor->pos);
 	rc = err = 0;
+
 	/* Are we at end of dir yet? */
-	i_size = i_size_read(vdir);
-	if (actor->pos >= i_size + vol->mft_record_size)
-	{
-		ntfs_debug("actor->pos 0x%llx exceed the End of File",
-			       	actor->pos);
+	if (is_exceed_dir_end(actor->pos, vdir))
 		return 0;
-	}
+
 	/* Emulate . and .. for all directories. */
 	if (!dir_emit_dots(file, actor))
-	{
 		return 0;
-	}
+
 	/* Are we jumping straight into the index allocation attribute? */
-	if (!is_actor_exceed_root(actor,vol))
-	{
+	if (!is_exceed_root(actor->pos, vol)) {
 		rc = index_root_iterate(vdir,
 			&(actor->pos),
-			ntfs_loop_filldir,actor);
-		if ( 1 ==  rc )
-		{
+			ntfs_loop_filldir, actor);
+		if (1 ==  rc)
 			goto abort;
-		}
-		else if ( rc )
-		{
+		else if (rc) {
 			err =  rc;
 			goto err_out;
-		}
-		else /* rc == 0 */
-		{
-			/* We are done with the index root and can free the buffer. */
-			/* If there is no index allocation attribute we are finished. */
+		} else /* rc == 0 */ {
+			/* We are done with the index root
+			and can free the buffer. */
+			/* If there is no index allocation attribute
+			we are finished. */
 			if (!NInoIndexAllocPresent(ndir))
 				goto EOD;
-			/* Advance fpos to the beginning of the index allocation. */
-			mark_actor_exceed_root(actor,vol);
+			/* Advance fpos to the beginning
+			of the index allocation. */
+			mark_actor_exceed_root(actor, vol);
 		}
-
 	}
 
 	ntfs_debug("Index Allocation Phase: Starting");
@@ -211,7 +204,7 @@ find_next_index_buffer:
 		err = rc ;
 		goto err_out;
 	}
-	else if (ia_pos == ( i_size + vol->mft_record_size))
+	else if (ia_pos == ( i_size_read(vdir) + vol->mft_record_size))
 	{
 		goto unm_EOD;
 	}
@@ -286,7 +279,7 @@ unm_EOD:
 	}
 EOD:
 	/* We are finished, set fpos to EOD. */
-	actor->pos = i_size + vol->mft_record_size;
+	actor->pos = i_size_read(vdir) + vol->mft_record_size;
 abort:
 	return 0;
 err_out:
@@ -300,107 +293,3 @@ err_out:
 	ntfs_debug("Failed. Returning error code %i.", -err);
 	return err;
 }
-
-/**
- * ntfs_dir_open - called when an inode is about to be opened
- * @vi:		inode to be opened
- * @filp:	file structure describing the inode
- *
- * Limit directory size to the page cache limit on architectures where unsigned
- * long is 32-bits. This is the most we can do for now without overflowing the
- * page cache page index. Doing it this way means we don't run into problems
- * because of existing too large directories. It would be better to allow the
- * user to read the accessible part of the directory but I doubt very much
- * anyone is going to hit this check on a 32-bit architecture, so there is no
- * point in adding the extra complexity required to support this.
- *
- * On 64-bit architectures, the check is hopefully optimized away by the
- * compiler.
- */
-static int ntfs_dir_open(struct inode *vi, struct file *filp)
-{
-	ntfs_debug("Calling ntfs_dir_open in [%s].", current->comm);
-	if (sizeof(unsigned long) < 8) {
-		if (i_size_read(vi) > MAX_LFS_FILESIZE)
-			return -EFBIG;
-	}
-	return 0;
-}
-
-#ifdef NTFS_RW
-
-/**
- * ntfs_dir_fsync - sync a directory to disk
- * @filp:	directory to be synced
- * @dentry:	dentry describing the directory to sync
- * @datasync:	if non-zero only flush user data and not metadata
- *
- * Data integrity sync of a directory to disk.  Used for fsync, fdatasync, and
- * msync system calls.  This function is based on file.c::ntfs_file_fsync().
- *
- * Write the mft record and all associated extent mft records as well as the
- * $INDEX_ALLOCATION and $BITMAP attributes and then sync the block device.
- *
- * If @datasync is true, we do not wait on the inode(s) to be written out
- * but we always wait on the page cache pages to be written out.
- *
- * Note: In the past @filp could be NULL so we ignore it as we don't need it
- * anyway.
- *
- * Locking: Caller must hold i_mutex on the inode.
- *
- * TODO: We should probably also write all attribute/index inodes associated
- * with this inode but since we have no simple way of getting to them we ignore
- * this problem for now.  We do write the $BITMAP attribute if it is present
- * which is the important one for a directory so things are not too bad.
- */
-static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
-			  int datasync)
-{
-	struct inode *bmp_vi, *vi = filp->f_mapping->host;
-	int err, ret;
-
-	ntfs_debug("Entering for inode 0x%lx.", vi->i_ino);
-
-	err = filemap_write_and_wait_range(vi->i_mapping, start, end);
-	if (err)
-		return err;
-	inode_lock(vi);
-
-	BUG_ON(!S_ISDIR(vi->i_mode));
-	/* If the bitmap attribute inode is in memory sync it, too. */
-	bmp_vi = ntfs_bitmap_vfs_inode_lookup(vi);
-	if (bmp_vi) {
- 		write_inode_now(bmp_vi, !datasync);
-		iput(bmp_vi);
-	}
-	ret = __ntfs_write_inode(vi, 1);
-	write_inode_now(vi, !datasync);
-	err = sync_blockdev(vi->i_sb->s_bdev);
-	if (unlikely(err && !ret))
-		ret = err;
-	if (likely(!ret))
-		ntfs_debug("Done.");
-	else
-		ntfs_warning(vi->i_sb, "Failed to f%ssync inode 0x%lx.  Error "
-				"%u.", datasync ? "data" : "", vi->i_ino, -ret);
-	inode_unlock(vi);
-	return ret;
-}
-
-#endif /* NTFS_RW */
-
-const struct file_operations ntfs_dir_ops = {
-	.llseek		= generic_file_llseek,	/* Seek inside directory. */
-	.read		= generic_read_dir,	/* Return -EISDIR. */
-	.iterate	= ntfs_dir_iterate,		/* Read directory contents. */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,4,0))
-	.readdir    = ntfs_readdir,     /* Read directory contents. */
-#endif
-#ifdef NTFS_RW
-	.fsync		= ntfs_dir_fsync,	/* Sync a directory to disk. */
-#endif /* NTFS_RW */
-	/*.ioctl	= ,*/			/* Perform function on the
-						   mounted filesystem. */
-	.open		= ntfs_dir_open,	/* Open directory. */
-};

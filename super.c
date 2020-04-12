@@ -99,7 +99,7 @@ static int simple_getbool(char *s, bool *setval)
  *
  * Parse the recognized options in @opt for the ntfs volume described by @vol.
  */
-static bool parse_options(ntfs_volume *vol, char *opt)
+static int parse_options(ntfs_volume *vol, char *opt)
 {
 	char *p, *v, *ov;
 	static char *utf8 = "utf8";
@@ -112,7 +112,7 @@ static bool parse_options(ntfs_volume *vol, char *opt)
 	struct nls_table *nls_map = NULL, *old_nls;
 
 	/* I am lazy... (-8 */
-#define NTFS_GETOPT_WITH_DEFAULT(option, variable, default_value)	\
+#define NTFS_GETOPT_WITH_DEFAULT(option, variable, default_value) \
 	if (!strcmp(p, option)) {					\
 		if (!v || !*v)						\
 			variable = default_value;			\
@@ -1970,7 +1970,7 @@ get_ctx_vol_failed:
 	ntfs_free(rp);
 #endif /* NTFS_RW */
 	/* Get the root directory inode so we can do path lookups. */
-	vol->root_ino = ntfs_iget(sb, FILE_root);
+	vol->root_ino = ntfs_iget(sb, FILE_ROOT);
 	if (IS_ERR(vol->root_ino) || is_bad_inode(vol->root_ino)) {
 		if (!IS_ERR(vol->root_ino))
 			iput(vol->root_ino);

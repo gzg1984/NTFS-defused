@@ -8,8 +8,9 @@ ntfs-y := aops.o attrib.o collate.o compress.o debug.o file.o \
 	  inode.o ntfs_inode.o 
 
 # For Index Entry Handler
-ntfs-y += dir/dir.o \
-	dir/readdir.o \
+ntfs-y += dir/dir_ops.o \
+	dir/ops_readdir.o \
+	dir/ops_iterate.o \
 	dir/namei.o \
 	dir/index.o \
 	dir/index_root.o \

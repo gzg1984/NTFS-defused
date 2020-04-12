@@ -218,7 +218,7 @@ typedef enum {
 				   Access Storage Device). */
 	FILE_AttrDef   = 4,	/* Array of attribute definitions in data
 				   attribute. */
-	FILE_root      = 5,	/* Root directory. */
+	FILE_ROOT      = 5,	/* Root directory. */
 	FILE_Bitmap    = 6,	/* Allocation bitmap of all clusters (lcns) in
 				   data attribute. */
 	FILE_Boot      = 7,	/* Boot sector (always at cluster 0) in data
@@ -2010,7 +2010,7 @@ typedef struct {
  * cluster numbers (vcns) in the index allocation attribute are in use by an
  * index block.
  *
- * NOTE: The root directory (FILE_root) contains an entry for itself. Other
+ * NOTE: The root directory (FILE_ROOT) contains an entry for itself. Other
  * directories do not contain entries for themselves, though.
  */
 typedef struct {
