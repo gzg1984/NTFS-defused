@@ -245,19 +245,19 @@ err_out:
  */
 int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
-	s64 ia_pos, ia_start, prev_ia_pos, bmp_pos;
+	s64 ia_pos, ia_start, prev_ia_pos;
 	loff_t fpos = filp->f_pos;
-	struct inode *bmp_vi, *vdir = filp->f_path.dentry->d_inode;
+	struct inode  *vdir = filp->f_path.dentry->d_inode;
 	struct super_block *sb = vdir->i_sb;
 	ntfs_inode *ndir = NTFS_I(vdir);
 	ntfs_volume *vol = NTFS_SB(sb);
 	INDEX_ENTRY *ie;
 	INDEX_ALLOCATION *ia;
 	u8 *name = NULL;
-	int rc, err, cur_bmp_pos;
-	struct address_space *ia_mapping, *bmp_mapping;
-	struct page *bmp_page = NULL, *ia_page = NULL;
-	u8 *kaddr, *bmp, *index_end;
+	int rc, err;
+	struct address_space *ia_mapping;
+	struct page *ia_page = NULL;
+	u8 *kaddr, *index_end;
 
 	rc = err = 0;
 
@@ -283,83 +283,42 @@ int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		goto err_out;
 	}
 	/* Are we jumping straight into the index allocation attribute? */
-	if (is_exceed_root(fpos, vol))
-		goto skip_index_root;
+	if (!is_exceed_root(fpos, vol)){
+		err =  fill_from_root(filp, dirent, vol, ndir, name, filldir);
+		if (err < 0 ) 
+			goto err_out;
+		if (err > 0 ) 
+			goto abort;
+	}
 
-	err =  fill_from_root(filp, dirent, vol, ndir, name, filldir);
-	if (err < 0 ) 
-		goto err_out;
-	if (err > 0 ) 
-		goto abort;
 
 	/* If there is no index allocation attribute we are finished. */
 	if (!NInoIndexAllocPresent(ndir))
 		goto EOD;
 	/* Advance fpos to the beginning of the index allocation. */
 	fpos = vol->mft_record_size;
-skip_index_root:
+
+
 	kaddr = NULL;
 	prev_ia_pos = -1LL;
 	/* Get the offset into the index allocation attribute. */
-	ia_pos = DIR_POS_TO_INDEX_ALLOCATION_POS(fpos, vol);
+	ia_pos = (s64) DIR_POS_TO_INDEX_ALLOCATION_POS(fpos, vol);
+
 	ia_mapping = vdir->i_mapping;
-	bmp_vi = ntfs_bitmap_vfs_inode_get(vdir);
-	if (IS_ERR(bmp_vi))
+
+find_next_index_buffer:
+	rc = get_available_pos_in_index_allocation_since_pos( vdir, &ia_pos);
+	if(rc)
 	{
-		ntfs_error(sb, "Failed to get bitmap attribute.");
-		err = PTR_ERR(bmp_vi);
+		err = rc ;
 		goto err_out;
 	}
-	bmp_mapping = bmp_vi->i_mapping;
-	/* Get the starting bitmap bit position and sanity check it. */
-	bmp_pos = ia_pos >> ndir->itype.index.block_size_bits;
-	if (unlikely(bmp_pos >> 3 >= i_size_read(bmp_vi)))
+	else if (ia_pos == ( i_size_read(vdir) + vol->mft_record_size))
 	{
-		ntfs_error(sb, "Current index allocation position exceeds "
-					   "index bitmap size.");
-		goto iput_err_out;
+		goto unm_EOD;
 	}
-	/* Get the starting bit position in the current bitmap page. */
-	cur_bmp_pos = bmp_pos & ((PAGE_CACHE_SIZE * 8) - 1);
-	bmp_pos &= ~(u64)((PAGE_CACHE_SIZE * 8) - 1);
-get_next_bmp_page:
-	ntfs_debug("Reading bitmap with page index 0x%llx, bit ofs 0x%llx",
-			   (unsigned long long)bmp_pos >> (3 + PAGE_CACHE_SHIFT),
-			   (unsigned long long)bmp_pos &
-				   (unsigned long long)((PAGE_CACHE_SIZE * 8) - 1));
-	bmp_page = ntfs_map_page(bmp_mapping,
-							 bmp_pos >> (3 + PAGE_CACHE_SHIFT));
-	if (IS_ERR(bmp_page))
-	{
-		ntfs_error(sb, "Reading index bitmap failed.");
-		err = PTR_ERR(bmp_page);
-		bmp_page = NULL;
-		goto iput_err_out;
-	}
-	bmp = (u8 *)page_address(bmp_page);
-	/* Find next index block in use. */
-	while (!(bmp[cur_bmp_pos >> 3] & (1 << (cur_bmp_pos & 7))))
-	{
-find_next_index_buffer:
-		cur_bmp_pos++;
-		/*
-		 * If we have reached the end of the bitmap page, get the next
-		 * page, and put away the old one.
-		 */
-		if (unlikely((cur_bmp_pos >> 3) >= PAGE_CACHE_SIZE))
-		{
-			ntfs_unmap_page(bmp_page);
-			bmp_pos += PAGE_CACHE_SIZE * 8;
-			cur_bmp_pos = 0;
-			goto get_next_bmp_page;
-		}
-		/* If we have reached the end of the bitmap, we are done. */
-		if (unlikely(((bmp_pos + cur_bmp_pos) >> 3) >= i_size_read(vdir)))
-			goto unm_EOD;
-		ia_pos = (bmp_pos + cur_bmp_pos) << ndir->itype.index.block_size_bits;
-	}
-	ntfs_debug("Handling index buffer 0x%llx.",
-			   (unsigned long long)bmp_pos + cur_bmp_pos);
+
+
 	/* If the current index buffer is in the same page we reuse the page. */
 	if ((prev_ia_pos & (s64)PAGE_CACHE_MASK) !=
 		(ia_pos & (s64)PAGE_CACHE_MASK))
@@ -385,6 +344,9 @@ find_next_index_buffer:
 		lock_page(ia_page);
 		kaddr = (u8 *)page_address(ia_page);
 	}
+
+
+
 	/* Get the current index buffer. */
 	ia = (INDEX_ALLOCATION *)(kaddr + (ia_pos & ~PAGE_CACHE_MASK &
 									   ~(s64)(ndir->itype.index.block_size - 1)));
@@ -494,15 +456,19 @@ find_next_index_buffer:
 		 */
 		rc = ntfs_filldir(vol, fpos, ndir, ia_page, ie, name, dirent,
 						  filldir);
-		if (rc)
+		if(rc)
 		{
 			/* @ia_page is already unlocked in this case. */
 			ntfs_unmap_page(ia_page);
-			ntfs_unmap_page(bmp_page);
-			iput(bmp_vi);
+			ia_pos = ia_start + ndir->itype.index.block_size;
+			filp->f_pos = ia_pos + vol->mft_record_size;
+			fpos = ia_pos + vol->mft_record_size;
 			goto abort;
 		}
 	}
+	ia_pos = ia_start + ndir->itype.index.block_size;
+	filp->f_pos = ia_pos + vol->mft_record_size;
+	fpos = ia_pos + vol->mft_record_size;
 	goto find_next_index_buffer;
 unm_EOD:
 	if (ia_page)
@@ -510,8 +476,6 @@ unm_EOD:
 		unlock_page(ia_page);
 		ntfs_unmap_page(ia_page);
 	}
-	ntfs_unmap_page(bmp_page);
-	iput(bmp_vi);
 EOD:
 	/* We are finished, set fpos to EOD. */
 	fpos = i_size_read(vdir) + vol->mft_record_size;
@@ -528,12 +492,6 @@ done:
 	filp->f_pos = fpos;
 	return 0;
 err_out:
-	if (bmp_page)
-	{
-		ntfs_unmap_page(bmp_page);
-	iput_err_out:
-		iput(bmp_vi);
-	}
 	if (ia_page)
 	{
 		unlock_page(ia_page);

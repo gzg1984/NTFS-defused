@@ -237,9 +237,9 @@ find_next_index_buffer:
 	}
 
 	/* Get the current index buffer. */
-	rc = ntfs_transfer_ia_pos_to_address(vdir, kaddr,ia_pos,
-			&ia,&ia_start,&index_end);
-	if (rc )
+	rc = ntfs_transfer_ia_pos_to_address(vdir, kaddr, ia_pos,
+			&ia, &ia_start, &index_end);
+	if (rc)
 	{
 		err = rc;
 		goto err_out;
