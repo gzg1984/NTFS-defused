@@ -21,15 +21,17 @@
  * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _LINUX_NTFS_ATTRIB_H
-#define _LINUX_NTFS_ATTRIB_H
-
 #include "endian.h"
 #include "types.h"
 #include "layout.h"
 #include "inode.h"
 #include "runlist.h"
 #include "volume.h"
+#include "attr/attr_bitmap.h"
+
+#ifndef _LINUX_NTFS_ATTRIB_H
+#define _LINUX_NTFS_ATTRIB_H
+
 /**
  * ntfs_attr_search_ctx - used in attribute search functions
  * @mrec:	buffer containing mft record to search

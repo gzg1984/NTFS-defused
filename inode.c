@@ -32,7 +32,6 @@
 #include "aops.h"
 #include "attrib.h"
 #include "bitmap.h"
-//#include "dir.h"
 #include "debug.h"
 #include "inode.h"
 #include "index.h"
@@ -253,10 +252,7 @@ struct inode *ntfs_iget(struct super_block *sb, unsigned long mft_no)
 	return vi;
 }
 
-inline struct inode *ntfs_bitmap_vfs_inode_get(struct inode *base_vi)
-{
-	return ntfs_attr_iget(base_vi, AT_BITMAP, I30, 4);
-}
+
 inline bool is_bit_set_in_page(u8* bmp,int offset_in_bitmap_page)
 {
 	return (bmp[offset_in_bitmap_page >> 3] & (1 << (offset_in_bitmap_page & 7)));
@@ -334,7 +330,7 @@ get_next_bmp_page:
 		else
 		{
 			/* not sure this ia_pos is available,
-			 * weill check the bitmap in 
+			 * will check the bitmap in 
 			 * next while trun
 			 */
 			*p_ia_pos = (index_block_pos + offset_in_bitmap_page) <<

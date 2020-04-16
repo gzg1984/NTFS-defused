@@ -272,7 +272,6 @@ int ntfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	/* first init after emit */
 	fpos = filp->f_pos;
 
-	
 	/*
 	 * Allocate a buffer to store the current name being processed
 	 * converted to format determined by current NLS.
@@ -302,10 +301,9 @@ skip_index_root:
 	kaddr = NULL;
 	prev_ia_pos = -1LL;
 	/* Get the offset into the index allocation attribute. */
-	ia_pos = (s64)fpos - vol->mft_record_size;
+	ia_pos = DIR_POS_TO_INDEX_ALLOCATION_POS(fpos, vol);
 	ia_mapping = vdir->i_mapping;
-	ntfs_debug("Inode 0x%lx, getting index bitmap.", vdir->i_ino);
-	bmp_vi = ntfs_attr_iget(vdir, AT_BITMAP, I30, 4);
+	bmp_vi = ntfs_bitmap_vfs_inode_get(vdir);
 	if (IS_ERR(bmp_vi))
 	{
 		ntfs_error(sb, "Failed to get bitmap attribute.");
@@ -342,7 +340,7 @@ get_next_bmp_page:
 	/* Find next index block in use. */
 	while (!(bmp[cur_bmp_pos >> 3] & (1 << (cur_bmp_pos & 7))))
 	{
-	find_next_index_buffer:
+find_next_index_buffer:
 		cur_bmp_pos++;
 		/*
 		 * If we have reached the end of the bitmap page, get the next

@@ -40,18 +40,9 @@
 #include "../lcnalloc.h"
 #include "../index.h"
 
-/*
- * int inline is_actor_exceed_root(const struct dir_context* actor, const ntfs_volume* vol)
- **/
+
 #define is_exceed_root(pos, vol) ((pos) >= vol->mft_record_size)
-/*
- * void inline mark_actor_exceed_root(/--output--/struct  dir_context* actor,const ntfs_volume* vol)
- */
 #define mark_actor_exceed_root(actor, vol) (actor->pos = vol->mft_record_size)
-/*
- * loff_t inline offset_actor_exceed_root(const struct dir_context* actor,const ntfs_volume* vol)
- */
-#define offset_actor_exceed_root(actor, vol) (actor->pos - vol->mft_record_size)
 
 int ntfs_dir_iterate(struct file *file, struct dir_context *actor);
 
@@ -96,4 +87,8 @@ static inline int ntfs_emit_dots(struct file *filp, void *dirent, filldir_t fill
 	}
 	return true;
 }
+
+
+#define DIR_POS_TO_INDEX_ALLOCATION_POS(fpos,vol) ((s64)fpos - vol->mft_record_size)
+
 #endif /* _LINUX_NTFS_FS_DIR_H */

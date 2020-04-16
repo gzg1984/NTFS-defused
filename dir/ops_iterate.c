@@ -194,7 +194,8 @@ int ntfs_dir_iterate(struct file *file, struct dir_context *actor)
 	kaddr = NULL;
 	prev_ia_pos = -1LL;
 	/* Get the offset into the index allocation attribute. */
-	ia_pos = (s64) offset_actor_exceed_root(actor,vol);
+	ia_pos = (s64) DIR_POS_TO_INDEX_ALLOCATION_POS(actor->pos, vol);
+
 	ia_mapping = vdir->i_mapping;
 
 find_next_index_buffer:
